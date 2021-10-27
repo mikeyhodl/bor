@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package proto;
 
+import "google/protobuf/empty.proto";
+
 option go_package = "/command/server/proto";
 
 service Bor {
@@ -20,8 +22,9 @@ service Bor {
     rpc AccountsList(AccountsListRequest) returns (AccountsListResponse);
 
     rpc AccountsImport(AccountsImportRequest) returns (AccountsImportResponse);
-}
 
+    rpc Status(google.protobuf.Empty) returns (StatusResponse);
+}
 
 message PeersAddRequest {
     string enode = 1;
@@ -91,6 +94,16 @@ message AccountsImportRequest {
 
 message AccountsImportResponse {
     Account account = 1;
+}
+
+message StatusResponse {
+    Header currentBlock = 1;
+    Header currentHeader = 2;
+}
+
+message Header {
+    string hash = 1;
+    uint64 number = 2;
 }
 
 message PprofRequest {

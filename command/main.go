@@ -104,6 +104,11 @@ func commands() map[string]cli.CommandFactory {
 				Meta: meta,
 			}, nil
 		},
+		"status": func() (cli.Command, error) {
+			return &StatusCommand{
+				Meta: meta,
+			}, nil
+		},
 	}
 }
 

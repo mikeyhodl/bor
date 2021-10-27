@@ -9,9 +9,11 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/command/server/pprof"
 	"github.com/ethereum/go-ethereum/command/server/proto"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/golang/protobuf/ptypes/empty"
 )
 
 func (s *Server) Pprof(ctx context.Context, req *proto.PprofRequest) (*proto.PprofResponse, error) {
@@ -146,5 +148,22 @@ func accountToProtoAccount(acc accounts.Account) *proto.Account {
 	return &proto.Account{
 		Address: acc.Address.String(),
 		Url:     acc.URL.String(),
+	}
+}
+
+func (s *Server) Status(ctx context.Context, _ *empty.Empty) (*proto.StatusResponse, error) {
+	apiBackend := s.backend.APIBackend
+
+	resp := &proto.StatusResponse{
+		CurrentHeader: headerToProtoHeader(apiBackend.CurrentHeader()),
+		CurrentBlock:  headerToProtoHeader(apiBackend.CurrentBlock().Header()),
+	}
+	return resp, nil
+}
+
+func headerToProtoHeader(h *types.Header) *proto.Header {
+	return &proto.Header{
+		Hash:   h.Hash().String(),
+		Number: h.Number.Uint64(),
 	}
 }

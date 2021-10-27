@@ -4,6 +4,7 @@ package proto
 
 import (
 	context "context"
+	empty "github.com/golang/protobuf/ptypes/empty"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -26,6 +27,7 @@ type BorClient interface {
 	AccountsNew(ctx context.Context, in *AccountsNewRequest, opts ...grpc.CallOption) (*AccountsNewResponse, error)
 	AccountsList(ctx context.Context, in *AccountsListRequest, opts ...grpc.CallOption) (*AccountsListResponse, error)
 	AccountsImport(ctx context.Context, in *AccountsImportRequest, opts ...grpc.CallOption) (*AccountsImportResponse, error)
+	Status(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*StatusResponse, error)
 }
 
 type borClient struct {
@@ -108,6 +110,15 @@ func (c *borClient) AccountsImport(ctx context.Context, in *AccountsImportReques
 	return out, nil
 }
 
+func (c *borClient) Status(ctx context.Context, in *empty.Empty, opts ...grpc.CallOption) (*StatusResponse, error) {
+	out := new(StatusResponse)
+	err := c.cc.Invoke(ctx, "/proto.Bor/Status", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // BorServer is the server API for Bor service.
 // All implementations must embed UnimplementedBorServer
 // for forward compatibility
@@ -120,6 +131,7 @@ type BorServer interface {
 	AccountsNew(context.Context, *AccountsNewRequest) (*AccountsNewResponse, error)
 	AccountsList(context.Context, *AccountsListRequest) (*AccountsListResponse, error)
 	AccountsImport(context.Context, *AccountsImportRequest) (*AccountsImportResponse, error)
+	Status(context.Context, *empty.Empty) (*StatusResponse, error)
 	mustEmbedUnimplementedBorServer()
 }
 
@@ -150,6 +162,9 @@ func (UnimplementedBorServer) AccountsList(context.Context, *AccountsListRequest
 }
 func (UnimplementedBorServer) AccountsImport(context.Context, *AccountsImportRequest) (*AccountsImportResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AccountsImport not implemented")
+}
+func (UnimplementedBorServer) Status(context.Context, *empty.Empty) (*StatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Status not implemented")
 }
 func (UnimplementedBorServer) mustEmbedUnimplementedBorServer() {}
 
@@ -308,6 +323,24 @@ func _Bor_AccountsImport_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Bor_Status_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(empty.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(BorServer).Status(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/proto.Bor/Status",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(BorServer).Status(ctx, req.(*empty.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Bor_ServiceDesc is the grpc.ServiceDesc for Bor service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -346,6 +379,10 @@ var Bor_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AccountsImport",
 			Handler:    _Bor_AccountsImport_Handler,
+		},
+		{
+			MethodName: "Status",
+			Handler:    _Bor_Status_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

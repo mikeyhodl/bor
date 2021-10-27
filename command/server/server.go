@@ -29,6 +29,7 @@ type Server struct {
 	node       *node.Node
 	grpcServer *grpc.Server
 	keystore   *keystore.KeyStore
+	backend    *eth.Ethereum
 }
 
 func NewServer(config *Config) (*Server, error) {
@@ -66,6 +67,7 @@ func NewServer(config *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	srv.backend = backend
 
 	// debug tracing is enabled by default
 	stack.RegisterAPIs(tracers.APIs(backend.APIBackend))
