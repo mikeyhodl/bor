@@ -1,0 +1,93 @@
+project_name: bor
+
+release:
+  disable: true
+  prerelease: auto
+
+builds:
+  - id: darwin-amd64
+    main: ./cmd/geth
+    binary: bor
+    goos:
+      - darwin
+    goarch:
+      - amd64
+    env:
+      - CC=o64-clang
+      - CXX=o64-clang++
+  
+  - id: darwin-arm64
+    main: ./cmd/geth
+    binary: bor
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    env:
+      - CC=oa64-clang
+      - CXX=oa64-clang++
+  
+  - id: linux-amd64
+    main: ./cmd/geth
+    binary: bor
+    goos:
+      - linux
+    goarch:
+      - amd64
+    env:
+      - CC=gcc
+      - CXX=g++
+
+  - id: linux-arm64
+    main: ./cmd/geth
+    binary: bor
+    goos:
+      - linux
+    goarch:
+      - arm64
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-g++
+
+nfpms:
+  -
+    vendor: 0xPolygon
+    homepage: https://polygon.technology
+    maintainer: Polygon Team <team@polygon.technology>
+    description: Polygon Blockchain
+    license: GPLv3 LGPLv3
+
+    formats:
+      - apk
+      - deb
+      - rpm
+
+    contents:
+      - src: builder/files/bor.service
+        dst: /lib/systemd/system/bor.service
+        type: config
+
+    overrides:
+      rpm:
+        replacements:
+          amd64: x86_64
+
+snapshot:
+  name_template: "{{ .Tag }}.next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
+
+dockers:
+  -
+    dockerfile: Dockerfile
+    ids:
+      - bor
+    image_templates:
+      - "0xpolygon/bor:latest"
+      - "0xpolygon/bor:{{ .Tag }}"
+      - "0xpolygon/bor:{{ .Major }}"
