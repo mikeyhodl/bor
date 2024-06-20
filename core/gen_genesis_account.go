@@ -7,13 +7,14 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/maticnetwork/bor/common"
-	"github.com/maticnetwork/bor/common/hexutil"
-	"github.com/maticnetwork/bor/common/math"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 )
 
 var _ = (*genesisAccountMarshaling)(nil)
 
+// MarshalJSON marshals as JSON.
 func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 	type GenesisAccount struct {
 		Code       hexutil.Bytes               `json:"code,omitempty"`
@@ -22,7 +23,9 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 		Nonce      math.HexOrDecimal64         `json:"nonce,omitempty"`
 		PrivateKey hexutil.Bytes               `json:"secretKey,omitempty"`
 	}
+
 	var enc GenesisAccount
+
 	enc.Code = g.Code
 	if g.Storage != nil {
 		enc.Storage = make(map[storageJSON]storageJSON, len(g.Storage))
@@ -30,12 +33,15 @@ func (g GenesisAccount) MarshalJSON() ([]byte, error) {
 			enc.Storage[storageJSON(k)] = storageJSON(v)
 		}
 	}
+
 	enc.Balance = (*math.HexOrDecimal256)(g.Balance)
 	enc.Nonce = math.HexOrDecimal64(g.Nonce)
 	enc.PrivateKey = g.PrivateKey
+
 	return json.Marshal(&enc)
 }
 
+// UnmarshalJSON unmarshals from JSON.
 func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 	type GenesisAccount struct {
 		Code       *hexutil.Bytes              `json:"code,omitempty"`
@@ -44,28 +50,35 @@ func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 		Nonce      *math.HexOrDecimal64        `json:"nonce,omitempty"`
 		PrivateKey *hexutil.Bytes              `json:"secretKey,omitempty"`
 	}
+
 	var dec GenesisAccount
 	if err := json.Unmarshal(input, &dec); err != nil {
 		return err
 	}
+
 	if dec.Code != nil {
 		g.Code = *dec.Code
 	}
+
 	if dec.Storage != nil {
 		g.Storage = make(map[common.Hash]common.Hash, len(dec.Storage))
 		for k, v := range dec.Storage {
 			g.Storage[common.Hash(k)] = common.Hash(v)
 		}
 	}
+
 	if dec.Balance == nil {
 		return errors.New("missing required field 'balance' for GenesisAccount")
 	}
+
 	g.Balance = (*big.Int)(dec.Balance)
 	if dec.Nonce != nil {
 		g.Nonce = uint64(*dec.Nonce)
 	}
+
 	if dec.PrivateKey != nil {
 		g.PrivateKey = *dec.PrivateKey
 	}
+
 	return nil
 }
