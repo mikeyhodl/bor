@@ -20,7 +20,7 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/maticnetwork/bor/common"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func bigFromHex(hex string) *big.Int {
@@ -39,7 +39,9 @@ func decodeFieldElement(in []byte) ([]byte, error) {
 			return nil, errors.New("invalid field element top bytes")
 		}
 	}
+
 	out := make([]byte, 48)
 	copy(out[:], in[16:])
+
 	return out, nil
 }

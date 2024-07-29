@@ -22,14 +22,12 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/maticnetwork/bor/common"
-	"github.com/maticnetwork/bor/core/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // NotFound is returned by API methods if the requested item does not exist.
 var NotFound = errors.New("not found")
-
-// TODO: move subscription to package event
 
 // Subscription represents an event subscription where events are
 // delivered on a data channel.
@@ -101,8 +99,27 @@ type SyncProgress struct {
 	StartingBlock uint64 // Block number where sync began
 	CurrentBlock  uint64 // Current block number where sync is at
 	HighestBlock  uint64 // Highest alleged block number in the chain
-	PulledStates  uint64 // Number of state trie entries already downloaded
-	KnownStates   uint64 // Total number of state trie entries known about
+
+	// "fast sync" fields. These used to be sent by geth, but are no longer used
+	// since version v1.10.
+	PulledStates uint64 // Number of state trie entries already downloaded
+	KnownStates  uint64 // Total number of state trie entries known about
+
+	// "snap sync" fields.
+	SyncedAccounts      uint64 // Number of accounts downloaded
+	SyncedAccountBytes  uint64 // Number of account trie bytes persisted to disk
+	SyncedBytecodes     uint64 // Number of bytecodes downloaded
+	SyncedBytecodeBytes uint64 // Number of bytecode bytes downloaded
+	SyncedStorage       uint64 // Number of storage slots downloaded
+	SyncedStorageBytes  uint64 // Number of storage trie bytes persisted to disk
+
+	HealedTrienodes     uint64 // Number of state trie nodes downloaded
+	HealedTrienodeBytes uint64 // Number of state trie bytes persisted to disk
+	HealedBytecodes     uint64 // Number of bytecodes downloaded
+	HealedBytecodeBytes uint64 // Number of bytecodes persisted to disk
+
+	HealingTrienodes uint64 // Number of state trie nodes pending
+	HealingBytecode  uint64 // Number of bytecodes pending
 }
 
 // ChainSyncReader wraps access to the node's current sync status. If there's no
@@ -113,12 +130,16 @@ type ChainSyncReader interface {
 
 // CallMsg contains parameters for contract calls.
 type CallMsg struct {
-	From     common.Address  // the sender of the 'transaction'
-	To       *common.Address // the destination contract (nil for contract creation)
-	Gas      uint64          // if 0, the call executes with near-infinite gas
-	GasPrice *big.Int        // wei <-> gas exchange ratio
-	Value    *big.Int        // amount of wei sent along with the call
-	Data     []byte          // input data, usually an ABI-encoded contract method invocation
+	From      common.Address  // the sender of the 'transaction'
+	To        *common.Address // the destination contract (nil for contract creation)
+	Gas       uint64          // if 0, the call executes with near-infinite gas
+	GasPrice  *big.Int        // wei <-> gas exchange ratio
+	GasFeeCap *big.Int        // EIP-1559 fee cap per gas.
+	GasTipCap *big.Int        // EIP-1559 tip per gas.
+	Value     *big.Int        // amount of wei sent along with the call
+	Data      []byte          // input data, usually an ABI-encoded contract method invocation
+
+	AccessList types.AccessList // EIP-2930 access list.
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by
@@ -150,11 +171,6 @@ type FilterQuery struct {
 	Topics [][]common.Hash
 }
 
-type FilterState struct {
-	Did      uint64
-	Contract common.Address
-}
-
 // LogFilterer provides access to contract log events using a one-off query or continuous
 // event subscription.
 //
@@ -181,6 +197,15 @@ type TransactionSender interface {
 // optimal gas price given current fee market conditions.
 type GasPricer interface {
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
+}
+
+// FeeHistory provides recent fee market data that consumers can use to determine
+// a reasonable maxPriorityFeePerGas value.
+type FeeHistory struct {
+	OldestBlock  *big.Int     // block corresponding to first response value
+	Reward       [][]*big.Int // list every txs priority fee per block
+	BaseFee      []*big.Int   // list of each block's base fee
+	GasUsedRatio []float64    // ratio of gas used out of the total available limit
 }
 
 // A PendingStateReader provides access to the pending state, which is the result of all
@@ -213,4 +238,29 @@ type GasEstimator interface {
 // pending state.
 type PendingStateEventer interface {
 	SubscribePendingTransactions(ctx context.Context, ch chan<- *types.Transaction) (Subscription, error)
+}
+
+// StateSyncFilter state sync filter
+type StateSyncFilter struct {
+	ID       uint64
+	Contract common.Address
+}
+
+// interface for whitelist service
+type ChainValidator interface {
+	IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error)
+	IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error)
+	GetWhitelistedCheckpoint() (bool, uint64, common.Hash)
+	GetWhitelistedMilestone() (bool, uint64, common.Hash)
+	ProcessCheckpoint(endBlockNum uint64, endBlockHash common.Hash)
+	ProcessMilestone(endBlockNum uint64, endBlockHash common.Hash)
+	ProcessFutureMilestone(num uint64, hash common.Hash)
+	PurgeWhitelistedCheckpoint()
+	PurgeWhitelistedMilestone()
+
+	LockMutex(endBlockNum uint64) bool
+	UnlockMutex(doLock bool, milestoneId string, endBlockNum uint64, endBlockHash common.Hash)
+	UnlockSprint(endBlockNum uint64)
+	RemoveMilestoneID(milestoneId string)
+	GetMilestoneIDsList() []string
 }
