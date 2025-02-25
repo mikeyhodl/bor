@@ -15,6 +15,8 @@
 */**/*dapps*
 build/_vendor/pkg
 
+cover.out
+
 #*
 .#*
 *#
@@ -27,6 +29,14 @@ build/_vendor/pkg
 /build/cache/
 /build/bin/
 /geth*.zip
+
+# used by the build/ci.go archive + upload tool
+/geth*.tar.gz
+/geth*.tar.gz.sig
+/geth*.tar.gz.asc
+/geth*.zip.sig
+/geth*.zip.asc
+
 
 # travis
 profile.tmp
@@ -47,3 +57,14 @@ profile.cov
 /dashboard/assets/package-lock.json
 
 **/yarn-error.log
+./test
+./bor-debug-*
+
+dist
+
+.dccache
+
+*.csv
+logs/
+
+tests/spec-tests/
