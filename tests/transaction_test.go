@@ -14,32 +14,32 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//go:build integration
+// +build integration
+
 package tests
 
 import (
 	"testing"
 
-	"github.com/maticnetwork/bor/params"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 func TestTransaction(t *testing.T) {
 	t.Parallel()
 
 	txt := new(testMatcher)
-	// These can't be parsed, invalid hex in RLP
-	txt.skipLoad("^ttWrongRLP/.*")
 	// We don't allow more than uint64 in gas amount
 	// This is a pseudo-consensus vulnerability, but not in practice
 	// because of the gas limit
 	txt.skipLoad("^ttGasLimit/TransactionWithGasLimitxPriceOverflow.json")
 	// We _do_ allow more than uint64 in gas price, as opposed to the tests
 	// This is also not a concern, as long as tx.Cost() uses big.Int for
-	// calculating the final cozt
-	txt.skipLoad(".*TransactionWithGasPriceOverflow.*")
+	// calculating the final cost
+	txt.skipLoad("^ttGasPrice/TransactionWithGasPriceOverflow.json")
 
-	// The nonce is too large for uint64. Not a concern, it means geth won't
-	// accept transactions at a certain point in the distant future
-	txt.skipLoad("^ttNonce/TransactionWithHighNonce256.json")
+	// The maximum value of nonce is 2^64 - 1
+	txt.skipLoad("^ttNonce/TransactionWithHighNonce64Minus1.json")
 
 	// The value is larger than uint64, which according to the test is invalid.
 	// Geth accepts it, which is not a consensus issue since we use big.Int's
@@ -47,8 +47,8 @@ func TestTransaction(t *testing.T) {
 	txt.skipLoad("^ttValue/TransactionWithHighValueOverflow.json")
 	txt.walk(t, transactionTestDir, func(t *testing.T, name string, test *TransactionTest) {
 		cfg := params.MainnetChainConfig
-		if err := txt.checkFailure(t, name, test.Run(cfg)); err != nil {
-			t.Error(err)
+		if err := txt.checkFailure(t, test.Run(cfg)); err != nil {
+			t.Errorf("in 'transaction_test.go', test '%s' failed with error: '%v'", name, err)
 		}
 	})
 }
