@@ -17,10 +17,12 @@
 package p2p
 
 import (
+	"cmp"
 	"fmt"
+	"strings"
 
-	"github.com/maticnetwork/bor/p2p/enode"
-	"github.com/maticnetwork/bor/p2p/enr"
+	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/p2p/enr"
 )
 
 // Protocol represents a P2P subprotocol implementation.
@@ -77,10 +79,10 @@ func (cap Cap) String() string {
 	return fmt.Sprintf("%s/%d", cap.Name, cap.Version)
 }
 
-type capsByNameAndVersion []Cap
-
-func (cs capsByNameAndVersion) Len() int      { return len(cs) }
-func (cs capsByNameAndVersion) Swap(i, j int) { cs[i], cs[j] = cs[j], cs[i] }
-func (cs capsByNameAndVersion) Less(i, j int) bool {
-	return cs[i].Name < cs[j].Name || (cs[i].Name == cs[j].Name && cs[i].Version < cs[j].Version)
+// Cmp defines the canonical sorting order of capabilities.
+func (cap Cap) Cmp(other Cap) int {
+	if cap.Name == other.Name {
+		return cmp.Compare(cap.Version, other.Version)
+	}
+	return strings.Compare(cap.Name, other.Name)
 }

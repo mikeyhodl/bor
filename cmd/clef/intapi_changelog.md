@@ -14,7 +14,7 @@ Additional labels for pre-release and build metadata are available as extensions
 
 Added `clef_New` to the internal API callable from a UI.
 
-> `New` creates a new password protected Account. The private key is protected with
+> `New` creates a new password-protected Account. The private key is protected with
 > the given password. Users are responsible to backup the private key that is stored
 > in the keystore location that was specified when this API was created.
 > This method is the same as New on the external API, the difference being that
@@ -94,7 +94,7 @@ type Account struct {
 >  Notifications are not confirmable by definition, since they do not have a Response object to be returned. As such, the Client would not be aware of any errors (like e.g. "Invalid params","Internal error"
 ### 3.1.0
 
-* Add `ContentType` `string` to `SignDataRequest` to accommodate the latest EIP-191 and EIP-712 implementations.
+* Add `ContentType` `string` to `SignDataRequest` to accommodate the latest [EIP-191](https://eips.ethereum.org/EIPS/eip-191) and [EIP-712](https://eips.ethereum.org/EIPS/eip-712) implementations.
 
 ### 3.0.0
 
