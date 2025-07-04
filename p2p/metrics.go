@@ -19,23 +19,85 @@
 package p2p
 
 import (
+	"errors"
 	"net"
 
-	"github.com/maticnetwork/bor/metrics"
+	"github.com/ethereum/go-ethereum/metrics"
 )
 
 const (
+	// HandleHistName is the prefix of the per-packet serving time histograms.
+	HandleHistName = "p2p/handle"
+
+	// ingressMeterName is the prefix of the per-packet inbound metrics.
 	ingressMeterName = "p2p/ingress"
-	egressMeterName  = "p2p/egress"
+
+	// egressMeterName is the prefix of the per-packet outbound metrics.
+	egressMeterName = "p2p/egress"
 )
 
 var (
-	ingressConnectMeter = metrics.NewRegisteredMeter("p2p/serves", nil)
-	ingressTrafficMeter = metrics.NewRegisteredMeter(ingressMeterName, nil)
-	egressConnectMeter  = metrics.NewRegisteredMeter("p2p/dials", nil)
-	egressTrafficMeter  = metrics.NewRegisteredMeter(egressMeterName, nil)
-	activePeerGauge     = metrics.NewRegisteredGauge("p2p/peers", nil)
+	activePeerGauge         = metrics.NewRegisteredGauge("p2p/peers", nil)
+	activeInboundPeerGauge  = metrics.NewRegisteredGauge("p2p/peers/inbound", nil)
+	activeOutboundPeerGauge = metrics.NewRegisteredGauge("p2p/peers/outbound", nil)
+
+	ingressTrafficMeter = metrics.NewRegisteredMeter("p2p/ingress", nil)
+	egressTrafficMeter  = metrics.NewRegisteredMeter("p2p/egress", nil)
+
+	// general ingress/egress connection meters
+	serveMeter          = metrics.NewRegisteredMeter("p2p/serves", nil)
+	serveSuccessMeter   = metrics.NewRegisteredMeter("p2p/serves/success", nil)
+	dialMeter           = metrics.NewRegisteredMeter("p2p/dials", nil)
+	dialSuccessMeter    = metrics.NewRegisteredMeter("p2p/dials/success", nil)
+	dialConnectionError = metrics.NewRegisteredMeter("p2p/dials/error/connection", nil) // dial timeout; no route to host; connection refused; network is unreachable
+
+	// count peers that stayed connected for at least 1 min
+	serve1MinSuccessMeter = metrics.NewRegisteredMeter("p2p/serves/success/1min", nil)
+	dial1MinSuccessMeter  = metrics.NewRegisteredMeter("p2p/dials/success/1min", nil)
+
+	// handshake error meters
+	dialTooManyPeers        = metrics.NewRegisteredMeter("p2p/dials/error/saturated", nil)
+	dialAlreadyConnected    = metrics.NewRegisteredMeter("p2p/dials/error/known", nil)
+	dialSelf                = metrics.NewRegisteredMeter("p2p/dials/error/self", nil)
+	dialUselessPeer         = metrics.NewRegisteredMeter("p2p/dials/error/useless", nil)
+	dialUnexpectedIdentity  = metrics.NewRegisteredMeter("p2p/dials/error/id/unexpected", nil)
+	dialEncHandshakeError   = metrics.NewRegisteredMeter("p2p/dials/error/rlpx/enc", nil)   // EOF; connection reset during handshake; message too big; i/o timeout
+	dialProtoHandshakeError = metrics.NewRegisteredMeter("p2p/dials/error/rlpx/proto", nil) // EOF
+
+	// capture the rest of errors that are not handled by the above meters
+	dialOtherError = metrics.NewRegisteredMeter("p2p/dials/error/other", nil)
 )
+
+// markDialError matches errors that occur while setting up a dial connection to the
+// corresponding meter. We don't maintain meters for evert possible error, just for
+// the most interesting ones.
+func markDialError(err error) {
+	if !metrics.Enabled() {
+		return
+	}
+
+	var reason DiscReason
+	var handshakeErr *protoHandshakeError
+	d := errors.As(err, &reason)
+	switch {
+	case d && reason == DiscTooManyPeers:
+		dialTooManyPeers.Mark(1)
+	case d && reason == DiscAlreadyConnected:
+		dialAlreadyConnected.Mark(1)
+	case d && reason == DiscSelf:
+		dialSelf.Mark(1)
+	case d && reason == DiscUselessPeer:
+		dialUselessPeer.Mark(1)
+	case d && reason == DiscUnexpectedIdentity:
+		dialUnexpectedIdentity.Mark(1)
+	case errors.As(err, &handshakeErr):
+		dialProtoHandshakeError.Mark(1)
+	case errors.Is(err, errEncHandshakeError):
+		dialEncHandshakeError.Mark(1)
+	default:
+		dialOtherError.Mark(1)
+	}
+}
 
 // meteredConn is a wrapper around a net.Conn that meters both the
 // inbound and outbound network traffic.
@@ -46,18 +108,10 @@ type meteredConn struct {
 // newMeteredConn creates a new metered connection, bumps the ingress or egress
 // connection meter and also increases the metered peer count. If the metrics
 // system is disabled, function returns the original connection.
-func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
-	// Short circuit if metrics are disabled
-	if !metrics.Enabled {
+func newMeteredConn(conn net.Conn) net.Conn {
+	if !metrics.Enabled() {
 		return conn
 	}
-	// Bump the connection counters and wrap the connection
-	if ingress {
-		ingressConnectMeter.Mark(1)
-	} else {
-		egressConnectMeter.Mark(1)
-	}
-	activePeerGauge.Inc(1)
 	return &meteredConn{Conn: conn}
 }
 
@@ -66,6 +120,7 @@ func newMeteredConn(conn net.Conn, ingress bool, addr *net.TCPAddr) net.Conn {
 func (c *meteredConn) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
 	ingressTrafficMeter.Mark(int64(n))
+
 	return n, err
 }
 
@@ -74,15 +129,6 @@ func (c *meteredConn) Read(b []byte) (n int, err error) {
 func (c *meteredConn) Write(b []byte) (n int, err error) {
 	n, err = c.Conn.Write(b)
 	egressTrafficMeter.Mark(int64(n))
-	return n, err
-}
 
-// Close delegates a close operation to the underlying connection, unregisters
-// the peer from the traffic registries and emits close event.
-func (c *meteredConn) Close() error {
-	err := c.Conn.Close()
-	if err == nil {
-		activePeerGauge.Dec(1)
-	}
-	return err
+	return n, err
 }
