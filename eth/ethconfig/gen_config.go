@@ -20,62 +20,59 @@ import (
 // MarshalJSON marshals as JSON.
 func (c Config) MarshalJSON() ([]byte, error) {
 	type Config struct {
-		Genesis                              *core.Genesis `toml:",omitempty"`
-		NetworkId                            uint64
-		SyncMode                             downloader.SyncMode
-		HistoryMode                          history.HistoryMode
-		EthDiscoveryURLs                     []string
-		SnapDiscoveryURLs                    []string
-		NoPruning                            bool
-		NoPrefetch                           bool
-		TxLookupLimit                        uint64 `toml:",omitempty"`
-		TransactionHistory                   uint64 `toml:",omitempty"`
-		LogHistory                           uint64 `toml:",omitempty"`
-		LogNoHistory                         bool   `toml:",omitempty"`
-		LogExportCheckpoints                 string
-		StateHistory                         uint64                 `toml:",omitempty"`
-		StateScheme                          string                 `toml:",omitempty"`
-		RequiredBlocks                       map[uint64]common.Hash `toml:"-"`
-		SkipBcVersionCheck                   bool                   `toml:"-"`
-		DatabaseHandles                      int                    `toml:"-"`
-		DatabaseCache                        int
-		DatabaseFreezer                      string
-		LevelDbCompactionTableSize           uint64
-		LevelDbCompactionTableSizeMultiplier float64
-		LevelDbCompactionTotalSize           uint64
-		LevelDbCompactionTotalSizeMultiplier float64
-		TrieCleanCache                       int
-		TrieDirtyCache                       int
-		TrieTimeout                          time.Duration
-		SnapshotCache                        int
-		Preimages                            bool
-		TriesInMemory                        uint64
-		FilterLogCacheSize                   int
-		Miner                                miner.Config
-		TxPool                               legacypool.Config
-		BlobPool                             blobpool.Config
-		GPO                                  gasprice.Config
-		EnablePreimageRecording              bool
-		VMTrace                              string
-		VMTraceJsonConfig                    string
-		RPCGasCap                            uint64
-		RPCReturnDataLimit                   uint64
-		RPCEVMTimeout                        time.Duration
-		RPCTxFeeCap                          float64
-		OverridePrague                       *big.Int `toml:",omitempty"`
-		HeimdallURL                          string
-		HeimdallTimeout                      time.Duration
-		WithoutHeimdall                      bool
-		HeimdallgRPCAddress                  string
-		HeimdallWSAddress                    string
-		RunHeimdall                          bool
-		RunHeimdallArgs                      string
-		UseHeimdallApp                       bool
-		BorLogs                              bool
-		ParallelEVM                          core.ParallelEVMConfig `toml:",omitempty"`
-		DevFakeAuthor                        bool                   `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
-		OverrideVerkle                       *big.Int               `toml:",omitempty"`
-		EnableBlockTracking                  bool
+		Genesis                 *core.Genesis `toml:",omitempty"`
+		NetworkId               uint64
+		SyncMode                downloader.SyncMode
+		HistoryMode             history.HistoryMode
+		EthDiscoveryURLs        []string
+		SnapDiscoveryURLs       []string
+		NoPruning               bool
+		NoPrefetch              bool
+		TxLookupLimit           uint64 `toml:",omitempty"`
+		TransactionHistory      uint64 `toml:",omitempty"`
+		LogHistory              uint64 `toml:",omitempty"`
+		LogNoHistory            bool   `toml:",omitempty"`
+		LogExportCheckpoints    string
+		StateHistory            uint64                 `toml:",omitempty"`
+		StateScheme             string                 `toml:",omitempty"`
+		RequiredBlocks          map[uint64]common.Hash `toml:"-"`
+		SkipBcVersionCheck      bool                   `toml:"-"`
+		DatabaseHandles         int                    `toml:"-"`
+		DatabaseCache           int
+		DatabaseFreezer         string
+		DatabaseEra             string
+		TrieCleanCache          int
+		TrieDirtyCache          int
+		TrieTimeout             time.Duration
+		SnapshotCache           int
+		Preimages               bool
+		TriesInMemory           uint64
+		FilterLogCacheSize      int
+		Miner                   miner.Config
+		TxPool                  legacypool.Config
+		BlobPool                blobpool.Config
+		GPO                     gasprice.Config
+		EnablePreimageRecording bool
+		VMTrace                 string
+		VMTraceJsonConfig       string
+		RPCGasCap               uint64
+		RPCReturnDataLimit      uint64
+		RPCEVMTimeout           time.Duration
+		RPCTxFeeCap             float64
+		OverrideOsaka           *uint64 `toml:",omitempty"`
+		HeimdallURL             string
+		HeimdallTimeout         time.Duration
+		WithoutHeimdall         bool
+		HeimdallgRPCAddress     string
+		HeimdallWSAddress       string
+		RunHeimdall             bool
+		RunHeimdallArgs         string
+		UseHeimdallApp          bool
+		BorLogs                 bool
+		ParallelEVM             core.ParallelEVMConfig `toml:",omitempty"`
+		DevFakeAuthor           bool                   `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
+		OverrideVerkle          *big.Int               `toml:",omitempty"`
+		EnableBlockTracking     bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -98,10 +95,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	enc.DatabaseHandles = c.DatabaseHandles
 	enc.DatabaseCache = c.DatabaseCache
 	enc.DatabaseFreezer = c.DatabaseFreezer
-	enc.LevelDbCompactionTableSize = c.LevelDbCompactionTableSize
-	enc.LevelDbCompactionTableSizeMultiplier = c.LevelDbCompactionTableSizeMultiplier
-	enc.LevelDbCompactionTotalSize = c.LevelDbCompactionTotalSize
-	enc.LevelDbCompactionTotalSizeMultiplier = c.LevelDbCompactionTotalSizeMultiplier
+	enc.DatabaseEra = c.DatabaseEra
 	enc.TrieCleanCache = c.TrieCleanCache
 	enc.TrieDirtyCache = c.TrieDirtyCache
 	enc.TrieTimeout = c.TrieTimeout
@@ -120,7 +114,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	enc.RPCReturnDataLimit = c.RPCReturnDataLimit
 	enc.RPCEVMTimeout = c.RPCEVMTimeout
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
-	enc.OverridePrague = c.OverridePrague
+	enc.OverrideOsaka = c.OverrideOsaka
 	enc.HeimdallURL = c.HeimdallURL
 	enc.HeimdallTimeout = c.HeimdallTimeout
 	enc.WithoutHeimdall = c.WithoutHeimdall
@@ -140,62 +134,59 @@ func (c Config) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (c *Config) UnmarshalJSON(input []byte) error {
 	type Config struct {
-		Genesis                              *core.Genesis `toml:",omitempty"`
-		NetworkId                            *uint64
-		SyncMode                             *downloader.SyncMode
-		HistoryMode                          *history.HistoryMode
-		EthDiscoveryURLs                     []string
-		SnapDiscoveryURLs                    []string
-		NoPruning                            *bool
-		NoPrefetch                           *bool
-		TxLookupLimit                        *uint64 `toml:",omitempty"`
-		TransactionHistory                   *uint64 `toml:",omitempty"`
-		LogHistory                           *uint64 `toml:",omitempty"`
-		LogNoHistory                         *bool   `toml:",omitempty"`
-		LogExportCheckpoints                 *string
-		StateHistory                         *uint64                `toml:",omitempty"`
-		StateScheme                          *string                `toml:",omitempty"`
-		RequiredBlocks                       map[uint64]common.Hash `toml:"-"`
-		SkipBcVersionCheck                   *bool                  `toml:"-"`
-		DatabaseHandles                      *int                   `toml:"-"`
-		DatabaseCache                        *int
-		DatabaseFreezer                      *string
-		LevelDbCompactionTableSize           *uint64
-		LevelDbCompactionTableSizeMultiplier *float64
-		LevelDbCompactionTotalSize           *uint64
-		LevelDbCompactionTotalSizeMultiplier *float64
-		TrieCleanCache                       *int
-		TrieDirtyCache                       *int
-		TrieTimeout                          *time.Duration
-		SnapshotCache                        *int
-		Preimages                            *bool
-		TriesInMemory                        *uint64
-		FilterLogCacheSize                   *int
-		Miner                                *miner.Config
-		TxPool                               *legacypool.Config
-		BlobPool                             *blobpool.Config
-		GPO                                  *gasprice.Config
-		EnablePreimageRecording              *bool
-		VMTrace                              *string
-		VMTraceJsonConfig                    *string
-		RPCGasCap                            *uint64
-		RPCReturnDataLimit                   *uint64
-		RPCEVMTimeout                        *time.Duration
-		RPCTxFeeCap                          *float64
-		OverridePrague                       *big.Int `toml:",omitempty"`
-		HeimdallURL                          *string
-		HeimdallTimeout                      *time.Duration
-		WithoutHeimdall                      *bool
-		HeimdallgRPCAddress                  *string
-		HeimdallWSAddress                    *string
-		RunHeimdall                          *bool
-		RunHeimdallArgs                      *string
-		UseHeimdallApp                       *bool
-		BorLogs                              *bool
-		ParallelEVM                          *core.ParallelEVMConfig `toml:",omitempty"`
-		DevFakeAuthor                        *bool                   `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
-		OverrideVerkle                       *big.Int                `toml:",omitempty"`
-		EnableBlockTracking                  *bool
+		Genesis                 *core.Genesis `toml:",omitempty"`
+		NetworkId               *uint64
+		SyncMode                *downloader.SyncMode
+		HistoryMode             *history.HistoryMode
+		EthDiscoveryURLs        []string
+		SnapDiscoveryURLs       []string
+		NoPruning               *bool
+		NoPrefetch              *bool
+		TxLookupLimit           *uint64 `toml:",omitempty"`
+		TransactionHistory      *uint64 `toml:",omitempty"`
+		LogHistory              *uint64 `toml:",omitempty"`
+		LogNoHistory            *bool   `toml:",omitempty"`
+		LogExportCheckpoints    *string
+		StateHistory            *uint64                `toml:",omitempty"`
+		StateScheme             *string                `toml:",omitempty"`
+		RequiredBlocks          map[uint64]common.Hash `toml:"-"`
+		SkipBcVersionCheck      *bool                  `toml:"-"`
+		DatabaseHandles         *int                   `toml:"-"`
+		DatabaseCache           *int
+		DatabaseFreezer         *string
+		DatabaseEra             *string
+		TrieCleanCache          *int
+		TrieDirtyCache          *int
+		TrieTimeout             *time.Duration
+		SnapshotCache           *int
+		Preimages               *bool
+		TriesInMemory           *uint64
+		FilterLogCacheSize      *int
+		Miner                   *miner.Config
+		TxPool                  *legacypool.Config
+		BlobPool                *blobpool.Config
+		GPO                     *gasprice.Config
+		EnablePreimageRecording *bool
+		VMTrace                 *string
+		VMTraceJsonConfig       *string
+		RPCGasCap               *uint64
+		RPCReturnDataLimit      *uint64
+		RPCEVMTimeout           *time.Duration
+		RPCTxFeeCap             *float64
+		OverrideOsaka           *uint64 `toml:",omitempty"`
+		HeimdallURL             *string
+		HeimdallTimeout         *time.Duration
+		WithoutHeimdall         *bool
+		HeimdallgRPCAddress     *string
+		HeimdallWSAddress       *string
+		RunHeimdall             *bool
+		RunHeimdallArgs         *string
+		UseHeimdallApp          *bool
+		BorLogs                 *bool
+		ParallelEVM             *core.ParallelEVMConfig `toml:",omitempty"`
+		DevFakeAuthor           *bool                   `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
+		OverrideVerkle          *big.Int                `toml:",omitempty"`
+		EnableBlockTracking     *bool
 	}
 	var dec Config
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -261,17 +252,8 @@ func (c *Config) UnmarshalJSON(input []byte) error {
 	if dec.DatabaseFreezer != nil {
 		c.DatabaseFreezer = *dec.DatabaseFreezer
 	}
-	if dec.LevelDbCompactionTableSize != nil {
-		c.LevelDbCompactionTableSize = *dec.LevelDbCompactionTableSize
-	}
-	if dec.LevelDbCompactionTableSizeMultiplier != nil {
-		c.LevelDbCompactionTableSizeMultiplier = *dec.LevelDbCompactionTableSizeMultiplier
-	}
-	if dec.LevelDbCompactionTotalSize != nil {
-		c.LevelDbCompactionTotalSize = *dec.LevelDbCompactionTotalSize
-	}
-	if dec.LevelDbCompactionTotalSizeMultiplier != nil {
-		c.LevelDbCompactionTotalSizeMultiplier = *dec.LevelDbCompactionTotalSizeMultiplier
+	if dec.DatabaseEra != nil {
+		c.DatabaseEra = *dec.DatabaseEra
 	}
 	if dec.TrieCleanCache != nil {
 		c.TrieCleanCache = *dec.TrieCleanCache
@@ -327,8 +309,8 @@ func (c *Config) UnmarshalJSON(input []byte) error {
 	if dec.RPCTxFeeCap != nil {
 		c.RPCTxFeeCap = *dec.RPCTxFeeCap
 	}
-	if dec.OverridePrague != nil {
-		c.OverridePrague = dec.OverridePrague
+	if dec.OverrideOsaka != nil {
+		c.OverrideOsaka = dec.OverrideOsaka
 	}
 	if dec.HeimdallURL != nil {
 		c.HeimdallURL = *dec.HeimdallURL

@@ -128,6 +128,7 @@ type Config struct {
 	DatabaseHandles    int  `toml:"-"`
 	DatabaseCache      int
 	DatabaseFreezer    string
+	DatabaseEra        string
 
 	// Database - LevelDB options
 	LevelDbCompactionTableSize           uint64
@@ -210,6 +211,9 @@ type Config struct {
 
 	// Develop Fake Author mode to produce blocks without authorisation
 	DevFakeAuthor bool `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
+
+	// OverrideOsaka (TODO: remove after the fork)
+	OverrideOsaka *uint64 `toml:",omitempty"`
 
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *big.Int `toml:",omitempty"`

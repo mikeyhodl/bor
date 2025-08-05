@@ -7,7 +7,7 @@
 .PHONY: geth-linux-arm geth-linux-arm-5 geth-linux-arm-6 geth-linux-arm-7 geth-linux-arm64
 .PHONY: geth-darwin geth-darwin-386 geth-darwin-amd64
 .PHONY: geth-windows geth-windows-386 geth-windows-amd64
-.PHONY: geth all test lint fmt clean devtools help
+.PHONY: geth evm all test lint fmt clean devtools help
 
 GO ?= latest
 GOBIN = $(CURDIR)/build/bin
@@ -43,6 +43,12 @@ geth:
 	$(GORUN) build/ci.go install ./cmd/geth
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/geth\" to launch geth."
+
+#? evm: Build evm.
+evm:
+	$(GORUN) build/ci.go install ./cmd/evm
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/evm\" to launch evm."
 
 #? all: Build all packages and executables.
 all:
