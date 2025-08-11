@@ -54,13 +54,19 @@ type chainFreezer struct {
 	trigger chan chan struct{} // Manual blocking freeze trigger, test determinism
 }
 
+// NewChainFreezer is a small utility method around NewFreezer that sets the
+// default parameters for the chain storage.
+func NewChainFreezer(datadir string, namespace string, readonly bool, offset uint64) (*Freezer, error) {
+	return NewFreezer(datadir, namespace, readonly, offset, freezerTableSize, chainFreezerTableConfigs)
+}
+
 // newChainFreezer initializes the freezer for ancient chain segment.
 //
 //   - if the empty directory is given, initializes the pure in-memory
 //     state freezer (e.g. dev mode).
 //   - if non-empty directory is given, initializes the regular file-based
 //     state freezer.
-func newChainFreezer(datadir string, eraDir string, namespace string, readonly bool) (*chainFreezer, error) {
+func newChainFreezer(datadir string, eraDir string, namespace string, readonly bool, offset uint64) (*chainFreezer, error) {
 	if datadir == "" {
 		return &chainFreezer{
 			ancients: NewMemoryFreezer(readonly, chainFreezerTableConfigs),
@@ -68,7 +74,7 @@ func newChainFreezer(datadir string, eraDir string, namespace string, readonly b
 			trigger:  make(chan chan struct{}),
 		}, nil
 	}
-	freezer, err := NewFreezer(datadir, namespace, readonly, freezerTableSize, chainFreezerTableConfigs)
+	freezer, err := NewFreezer(datadir, namespace, readonly, offset, freezerTableSize, chainFreezerTableConfigs)
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +463,16 @@ func (f *chainFreezer) TruncateHead(items uint64) (uint64, error) {
 
 func (f *chainFreezer) TruncateTail(items uint64) (uint64, error) {
 	return f.ancients.TruncateTail(items)
+}
+
+// ItemAmountInAncient returns the actual length of current ancientDB.
+func (f *chainFreezer) ItemAmountInAncient() (uint64, error) {
+	panic("ItemAmountInAncient should not be called on chain freezer")
+}
+
+// AncientOffSet returns the offset of current ancientDB.
+func (f *chainFreezer) AncientOffSet() uint64 {
+	panic("AncientOffSet should not be called on chain freezer")
 }
 
 func (f *chainFreezer) SyncAncient() error {

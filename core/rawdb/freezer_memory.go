@@ -227,6 +227,22 @@ func NewMemoryFreezer(readonly bool, tableName map[string]freezerTableConfig) *M
 	}
 }
 
+// todo: @anshalshukla || @manav2401 - Check if implementation is required
+func (f *MemoryFreezer) AncientOffSet() uint64 {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	return f.offset.Load()
+}
+
+// todo: @anshalshukla || @manav2401 - Check if implementation is required
+func (f *MemoryFreezer) ItemAmountInAncient() (uint64, error) {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	return f.items - f.offset.Load(), nil
+}
+
 // Ancient retrieves an ancient binary blob from the in-memory freezer.
 func (f *MemoryFreezer) Ancient(kind string, number uint64) ([]byte, error) {
 	f.lock.RLock()

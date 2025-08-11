@@ -811,13 +811,15 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 // creates one if no previous can be found) from within the node's data directory.
 // If the node has no data directory, an in-memory database is returned.
 // Deprecated: use OpenDatabaseWithOptions instead.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly, disableFreeze, isLastOffset bool) (ethdb.Database, error) {
 	return n.OpenDatabaseWithOptions(name, DatabaseOptions{
 		AncientsDirectory: n.ResolveAncient(name, ancient),
 		MetricsNamespace:  namespace,
 		Cache:             cache,
 		Handles:           handles,
 		ReadOnly:          readonly,
+		DisableFreeze:     disableFreeze,
+		IsLastOffset:      isLastOffset,
 	})
 }
 

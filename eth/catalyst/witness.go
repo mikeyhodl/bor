@@ -97,8 +97,8 @@ func (api *ConsensusAPI) NewPayloadWithWitnessV1(params engine.ExecutableData) (
 // and returns a stateless witness after running the payload.
 func (api *ConsensusAPI) NewPayloadWithWitnessV2(params engine.ExecutableData) (engine.PayloadStatusV1, error) {
 	var (
-		cancun   = api.config().IsCancun(api.config().LondonBlock, params.Timestamp)
-		shanghai = api.config().IsShanghai(api.config().LondonBlock, params.Timestamp)
+		cancun   = api.config().IsCancun(api.config().LondonBlock)
+		shanghai = api.config().IsShanghai(api.config().LondonBlock)
 	)
 	switch {
 	case cancun:
@@ -174,8 +174,8 @@ func (api *ConsensusAPI) ExecuteStatelessPayloadV1(params engine.ExecutableData,
 // a stateless mode on top of a provided witness instead of the local database.
 func (api *ConsensusAPI) ExecuteStatelessPayloadV2(params engine.ExecutableData, opaqueWitness hexutil.Bytes) (engine.StatelessPayloadStatusV1, error) {
 	var (
-		cancun   = api.config().IsCancun(api.config().LondonBlock, params.Timestamp)
-		shanghai = api.config().IsShanghai(api.config().LondonBlock, params.Timestamp)
+		cancun   = api.config().IsCancun(api.config().LondonBlock)
+		shanghai = api.config().IsShanghai(api.config().LondonBlock)
 	)
 	switch {
 	case cancun:

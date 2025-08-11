@@ -213,7 +213,7 @@ type Config struct {
 	DevFakeAuthor bool `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
 
 	// OverrideOsaka (TODO: remove after the fork)
-	OverrideOsaka *uint64 `toml:",omitempty"`
+	OverrideOsaka *big.Int `toml:",omitempty"`
 
 	// OverrideVerkle (TODO: remove after the fork)
 	OverrideVerkle *big.Int `toml:",omitempty"`

@@ -38,7 +38,6 @@ import (
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/catalyst"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
@@ -220,24 +219,6 @@ func constructDevModeBanner(ctx *cli.Context, cfg gethConfig) string {
   5. Networking is disabled; there is no listen-address, the maximum number of peers is set
      to 0, and discovery is disabled.
 `
-	if !ctx.IsSet(utils.DataDirFlag.Name) {
-		devModeBanner += fmt.Sprintf(`
-
- Running in ephemeral mode.  The following account has been prefunded in the genesis:
-
-       Account
-       ------------------
-       0x%x (10^49 ETH)
-`, cfg.Eth.Miner.PendingFeeRecipient)
-		if cfg.Eth.Miner.PendingFeeRecipient == utils.DeveloperAddr {
-			devModeBanner += fmt.Sprintf(` 
-       Private Key
-       ------------------
-       0x%x
-`, crypto.FromECDSA(utils.DeveloperKey))
-		}
-	}
-
 	return devModeBanner
 }
 
@@ -245,8 +226,8 @@ func constructDevModeBanner(ctx *cli.Context, cfg gethConfig) string {
 func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	stack, cfg := makeConfigNode(ctx)
 	if ctx.IsSet(utils.OverrideOsaka.Name) {
-		v := ctx.Uint64(utils.OverrideOsaka.Name)
-		cfg.Eth.OverrideOsaka = &v
+		v := ctx.Int64(utils.OverrideOsaka.Name)
+		cfg.Eth.OverrideOsaka = new(big.Int).SetInt64(v)
 	}
 	if ctx.IsSet(utils.OverrideVerkle.Name) {
 		v := ctx.Int64(utils.OverrideVerkle.Name)

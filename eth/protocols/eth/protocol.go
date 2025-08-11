@@ -85,7 +85,7 @@ type Packet interface {
 	Kind() byte   // Kind returns the message type.
 }
 
-// StatusPacket is the network packet for the status message.
+// StatusPacket68 is the network packet for the status message.
 type StatusPacket68 struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
@@ -99,6 +99,7 @@ type StatusPacket68 struct {
 type StatusPacket69 struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
+	TD              *big.Int
 	Genesis         common.Hash
 	ForkID          forkid.ID
 	// initial available block range

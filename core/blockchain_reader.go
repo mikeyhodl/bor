@@ -351,6 +351,37 @@ func (bc *BlockChain) GetAncestor(hash common.Hash, number, ancestor uint64, max
 	return bc.hc.GetAncestor(hash, number, ancestor, maxNonCanonical)
 }
 
+// GetTransactionLookup retrieves the lookup along with the transaction
+// itself associate with the given transaction hash.
+//
+// A null will be returned if the transaction is not found. This can be due to
+// the transaction indexer not being finished. The caller must explicitly check
+// the indexer progress.
+func (bc *BlockChain) GetTransactionLookup(hash common.Hash) (*rawdb.LegacyTxLookupEntry, *types.Transaction) {
+	bc.txLookupLock.RLock()
+	defer bc.txLookupLock.RUnlock()
+
+	// Short circuit if the txlookup already in the cache, retrieve otherwise
+	if item, exist := bc.txLookupCache.Get(hash); exist {
+		return item.lookup, item.transaction
+	}
+
+	tx, blockHash, blockNumber, txIndex := rawdb.ReadTransaction(bc.db, hash)
+	if tx == nil {
+		return nil, nil
+	}
+	lookup := &rawdb.LegacyTxLookupEntry{
+		BlockHash:  blockHash,
+		BlockIndex: blockNumber,
+		Index:      txIndex,
+	}
+	bc.txLookupCache.Add(hash, txLookup{
+		lookup:      lookup,
+		transaction: tx,
+	})
+	return lookup, tx
+}
+
 // GetCanonicalTransaction retrieves the lookup along with the transaction
 // itself associate with the given transaction hash.
 //

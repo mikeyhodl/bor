@@ -606,8 +606,8 @@ func (api *ConsensusAPI) NewPayloadV1(params engine.ExecutableData) (engine.Payl
 // NewPayloadV2 creates an Eth1 block, inserts it in the chain, and returns the status of the chain.
 func (api *ConsensusAPI) NewPayloadV2(params engine.ExecutableData) (engine.PayloadStatusV1, error) {
 	var (
-		cancun   = api.config().IsCancun(api.config().LondonBlock, params.Timestamp)
-		shanghai = api.config().IsShanghai(api.config().LondonBlock, params.Timestamp)
+		cancun   = api.config().IsCancun(api.config().LondonBlock)
+		shanghai = api.config().IsShanghai(api.config().LondonBlock)
 	)
 	switch {
 	case cancun:

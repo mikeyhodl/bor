@@ -202,6 +202,9 @@ type BlockChainConfig struct {
 	// If the value is zero, all transactions of the entire chain will be indexed.
 	// If the value is -1, indexing is disabled.
 	TxLookupLimit int64
+
+	ShouldPreserve func(header *types.Header) bool
+	Checker        ethereum.ChainValidator
 }
 
 // DefaultConfig returns the default config.
@@ -218,6 +221,7 @@ func DefaultConfig() *BlockChainConfig {
 		// Transaction indexing is disabled by default.
 		// This is appropriate for most unit tests.
 		TxLookupLimit: -1,
+		VmConfig:      vm.Config{},
 	}
 }
 
@@ -350,11 +354,12 @@ type BlockChain struct {
 	logger                       *tracing.Hooks
 
 	// Bor related changes
-	borReceiptsCache *lru.Cache[common.Hash, *types.Receipt] // Cache for the most recent bor receipt receipts per block
-	stateSyncData    []*types.StateSyncData                  // State sync data
-	stateSyncFeed    event.Feed                              // State sync feed
-	chain2HeadFeed   event.Feed                              // Reorg/NewHead/Fork data feed
-	chainSideFeed    event.Feed                              // Side chain data feed (removed from geth but needed in bor)
+	borReceiptsCache    *lru.Cache[common.Hash, *types.Receipt] // Cache for the most recent bor receipt receipts per block
+	borReceiptsRLPCache *lru.Cache[common.Hash, rlp.RawValue]   // Cache for the most recent bor receipt RLPs per block
+	stateSyncData       []*types.StateSyncData                  // State sync data
+	stateSyncFeed       event.Feed                              // State sync feed
+	chain2HeadFeed      event.Feed                              // Reorg/NewHead/Fork data feed
+	chainSideFeed       event.Feed                              // Side chain data feed (removed from geth but needed in bor)
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -413,7 +418,7 @@ func NewBlockChain(db ethdb.Database, genesis *Genesis, engine consensus.Engine,
 	if err != nil {
 		return nil, err
 	}
-	bc.forker = NewForkChoice(bc, shouldPreserve, checker)
+	bc.forker = NewForkChoice(bc, cfg.ShouldPreserve, cfg.Checker)
 	bc.flushInterval.Store(int64(cfg.TrieTimeLimit))
 	bc.statedb = state.NewDatabase(bc.triedb, nil)
 	bc.validator = NewBlockValidator(chainConfig, bc)
@@ -587,8 +592,8 @@ func NewBlockChain(db ethdb.Database, genesis *Genesis, engine consensus.Engine,
 }
 
 // NewParallelBlockChain , similar to NewBlockChain, creates a new blockchain object, but with a parallel state processor
-func NewParallelBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis, overrides *ChainOverrides, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64, checker ethereum.ChainValidator, numprocs int, enforce bool) (*BlockChain, error) {
-	bc, err := NewBlockChain(db, cacheConfig, genesis, overrides, engine, vmConfig, shouldPreserve, txLookupLimit, checker)
+func NewParallelBlockChain(db ethdb.Database, genesis *Genesis, engine consensus.Engine, cfg *BlockChainConfig, numprocs int, enforce bool) (*BlockChain, error) {
+	bc, err := NewBlockChain(db, genesis, engine, cfg)
 
 	if err != nil {
 		return nil, err
@@ -631,7 +636,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 	if err != nil {
 		return nil, nil, 0, nil, 0, err
 	}
-	statedb, err = state.NewWithReader(parentRoot, bc.statedb, process)
+	statedb, err := state.NewWithReader(parentRoot, bc.statedb, process)
 	if err != nil {
 		return nil, nil, 0, nil, 0, err
 	}
@@ -650,14 +655,16 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		storageCacheMissMeter.Mark(stats.StorageMiss)
 	}()
 
+	var followupInterrupt atomic.Bool
+
 	go func(start time.Time, throwaway *state.StateDB, block *types.Block) {
 		// Disable tracing for prefetcher executions.
 		vmCfg := bc.cfg.VmConfig
 		vmCfg.Tracer = nil
-		bc.prefetcher.Prefetch(block, throwaway, vmCfg, &interrupt)
+		bc.prefetcher.Prefetch(block, throwaway, vmCfg, &followupInterrupt)
 
 		blockPrefetchExecuteTimer.Update(time.Since(start))
-		if interrupt.Load() {
+		if followupInterrupt.Load() {
 			blockPrefetchInterruptMeter.Mark(1)
 		}
 	}(time.Now(), throwaway, block)
@@ -1590,6 +1597,13 @@ func (bc *BlockChain) InterruptInsert(on bool) {
 	}
 }
 
+// StopInsert interrupts all insertion methods, causing them to return
+// errInsertionInterrupted as soon as possible. Insertion is permanently disabled after
+// calling this method.
+func (bc *BlockChain) StopInsert() {
+	bc.procInterrupt.Store(true)
+}
+
 // insertStopped returns true after StopInsert has been called.
 func (bc *BlockChain) insertStopped() bool {
 	return bc.procInterrupt.Load()
@@ -1614,7 +1628,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 	var (
 		ancientBlocks, liveBlocks     types.Blocks
-		ancientReceipts, liveReceipts []types.Receipts
+		ancientReceipts, liveReceipts []rlp.RawValue
 	)
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i, block := range blockChain {
@@ -1689,7 +1703,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	//
 	// this function only accepts canonical chain data. All side chain will be reverted
 	// eventually.
-	writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
+	writeAncient := func(blockChain types.Blocks, receiptChain []rlp.RawValue) (int, error) {
 		first := blockChain[0]
 		last := blockChain[len(blockChain)-1]
 
@@ -1697,7 +1711,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		if first.NumberU64() == 1 {
 			if frozen, _ := bc.db.Ancients(); frozen == 0 {
 				td := bc.genesisBlock.Difficulty()
-				writeSize, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []types.Receipts{nil}, []types.Receipts{nil}, td)
+				writeSize, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []rlp.RawValue{rlp.EmptyList}, []rlp.RawValue{rlp.EmptyList}, td)
 				if err != nil {
 					log.Error("Error writing genesis to ancients", "err", err)
 					return 0, err
@@ -1710,12 +1724,12 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		}
 		// BOR: Retrieve all the bor receipts and also maintain the array of headers
 		// for bor specific reorg check.
-		borReceipts := []types.Receipts{}
+		borReceipts := []rlp.RawValue{}
 
 		var headers []*types.Header
 
 		for _, block := range blockChain {
-			borReceipts = append(borReceipts, []*types.Receipt{bc.GetBorReceiptByHash(block.Hash())})
+			borReceipts = append(borReceipts, bc.GetBorReceiptRLPByHash(block.Hash()))
 			headers = append(headers, block.Header())
 		}
 
@@ -1811,7 +1825,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	}
 
 	// writeLive writes blockchain and corresponding receipt chain into active store.
-	writeLive := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
+	writeLive := func(blockChain types.Blocks, receiptChain []rlp.RawValue) (int, error) {
 		headers := make([]*types.Header, 0, len(blockChain))
 		var (
 			skipPresenceCheck = false
@@ -2020,7 +2034,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	// If we're running an archive node, always flush
 	if bc.cfg.ArchiveMode {
-		return bc.triedb.Commit(root, false)
+		return []*types.Log{}, bc.triedb.Commit(root, false)
 	}
 	// Full but not archive node, do proper garbage collection
 	bc.triedb.Reference(root, common.Hash{}) // metadata reference to keep trie alive
@@ -2372,6 +2386,19 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		bc.reportBlock(block, nil, err)
 		return nil, it.index, err
 	}
+
+	// No validation errors for the first block (or chain prefix skipped)
+	var activeState *state.StateDB
+	defer func() {
+		// The chain importer is starting and stopping trie prefetchers. If a bad
+		// block or other error is hit however, an early return may not properly
+		// terminate the background threads. This defer ensures that we clean up
+		// and dangling prefetcher, without deferring each and holding on live refs.
+		if activeState != nil {
+			activeState.StopPrefetcher()
+		}
+	}()
+
 	// Track the singleton witness from this chain insertion (if any)
 	var witness *stateless.Witness
 
@@ -2461,6 +2488,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			continue
 		}
 		// Retrieve the parent block and it's state to execute on top
+		start := time.Now()
+
 		parent := it.previous()
 		if parent == nil {
 			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
@@ -2597,8 +2626,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 
 		// Report the import stats before returning the various results
 		stats.processed++
-		stats.usedGas += res.usedGas
-		witness = res.witness
+		stats.usedGas += usedGas
+		witness = witness
 
 		var snapDiffItems, snapBufItems common.StorageSize
 		if bc.snaps != nil {
@@ -2694,6 +2723,8 @@ type blockProcessingResult struct {
 // it writes the block and associated state to database.
 // nolint : unused
 func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, start time.Time, setHead bool) (_ *blockProcessingResult, blockEndErr error) {
+	var startTime = time.Now()
+
 	if bc.logger != nil && bc.logger.OnBlockStart != nil {
 		td := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 		bc.logger.OnBlockStart(tracing.BlockEvent{
@@ -2725,13 +2756,15 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 	}
 	vtime := time.Since(vstart)
 
+	var witness *stateless.Witness
+
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the
 	// witness builder/runner, which would otherwise be impossible due to the
 	// various invalid chain states/behaviors being contained in those tests.
 	xvstart := time.Now()
-	if witness := statedb.Witness(); witness != nil && bc.cfg.VmConfig.StatelessSelfValidation {
+	if witness = statedb.Witness(); witness != nil && bc.cfg.VmConfig.StatelessSelfValidation {
 		log.Warn("Running stateless self-validation", "block", block.Number(), "hash", block.Hash())
 
 		// Remove critical computed fields from the block to force true recalculation
@@ -3478,7 +3511,8 @@ func (bc *BlockChain) InsertHeadersBeforeCutoff(headers []*types.Header) (int, e
 		first     = headers[0].Number.Uint64()
 	)
 	if first == 1 && frozen == 0 {
-		_, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []rlp.RawValue{rlp.EmptyList})
+		td := bc.genesisBlock.Difficulty()
+		_, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []rlp.RawValue{rlp.EmptyList}, []rlp.RawValue{rlp.EmptyList}, td)
 		if err != nil {
 			log.Error("Error writing genesis to ancients", "err", err)
 			return 0, err

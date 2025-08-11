@@ -275,15 +275,15 @@ func initGenesis(ctx *cli.Context) error {
 
 	var overrides core.ChainOverrides
 	if ctx.IsSet(utils.OverrideOsaka.Name) {
-		v := ctx.Uint64(utils.OverrideOsaka.Name)
-		overrides.OverrideOsaka = &v
+		v := ctx.Int64(utils.OverrideOsaka.Name)
+		overrides.OverrideOsaka = new(big.Int).SetInt64(v)
 	}
 	if ctx.IsSet(utils.OverrideVerkle.Name) {
 		v := ctx.Int64(utils.OverrideVerkle.Name)
 		overrides.OverrideVerkle = new(big.Int).SetInt64(v)
 	}
 
-	chaindb := utils.MakeChainDatabase(ctx, stack, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer chaindb.Close()
 
 	triedb := utils.MakeTrieDatabase(ctx, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())

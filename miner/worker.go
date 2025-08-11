@@ -1032,7 +1032,7 @@ mainloop:
 		}
 
 		// Make sure all transactions after osaka have cell proofs
-		if miner.chainConfig.IsOsaka(env.header.Number, env.header.Time) {
+		if w.chainConfig.IsOsaka(env.header.Number) {
 			if sidecar := tx.BlobTxSidecar(); sidecar != nil {
 				if sidecar.Version == 0 {
 					log.Info("Including blob tx with v0 sidecar, recomputing proofs", "hash", ltx.Hash)

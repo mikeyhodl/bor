@@ -1899,7 +1899,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		SetDNSDiscoveryDefaults(cfg, params.HoodiGenesisHash)
 	case ctx.Bool(DeveloperFlag.Name):
 		cfg.NetworkId = 1337
-		cfg.SyncMode = ethconfig.FullSync
+		cfg.SyncMode = downloader.FullSync
 		cfg.EnablePreimageRecording = true
 		// Create new developer account or reuse existing one
 		var (

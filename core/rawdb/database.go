@@ -131,6 +131,16 @@ func (db *nofreezedb) TruncateTail(items uint64) (uint64, error) {
 	return 0, errNotSupported
 }
 
+// ItemAmountInAncient returns an error as we don't have a backing chain freezer.
+func (db *nofreezedb) ItemAmountInAncient() (uint64, error) {
+	return 0, errNotSupported
+}
+
+// AncientOffSet returns 0 as we don't have a backing chain freezer.
+func (db *nofreezedb) AncientOffSet() uint64 {
+	return 0
+}
+
 // SyncAncient returns an error as we don't have a backing chain freezer.
 func (db *nofreezedb) SyncAncient() error {
 	return errNotSupported
@@ -244,16 +254,29 @@ func resolveChainEraDir(chainFreezerDir string, era string) string {
 	}
 }
 
+// resolveOffset is a helper function which resolves the value of offset to use
+// while opening a chain freezer.
+func resolveOffset(db ethdb.KeyValueStore, isLastOffset bool) uint64 {
+	// The offset of ancientDB should be handled differently in different scenarios.
+	if isLastOffset {
+		return ReadOffsetOfLastAncientFreezer(db)
+	} else {
+		return ReadOffsetOfCurrentAncientFreezer(db)
+	}
+}
+
 // NewDatabaseWithFreezer creates a high level database on top of a given key-value store.
 // The passed ancient indicates the path of root ancient directory where the chain freezer
 // can be opened.
 //
 // Deprecated: use Open.
-func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly, disableFreeze, isLastOffset bool) (ethdb.Database, error) {
 	return Open(db, OpenOptions{
 		Ancient:          ancient,
 		MetricsNamespace: namespace,
 		ReadOnly:         readonly,
+		DisableFreeze:    disableFreeze,
+		IsLastOffset:     isLastOffset,
 	})
 }
 
@@ -263,10 +286,15 @@ type OpenOptions struct {
 	Era              string // era files directory
 	MetricsNamespace string // prefix added to freezer metric names
 	ReadOnly         bool
+	DisableFreeze    bool
+	IsLastOffset     bool
 }
 
 // Open creates a high-level database wrapper for the given key-value store.
 func Open(db ethdb.KeyValueStore, opts OpenOptions) (ethdb.Database, error) {
+	offset := resolveOffset(db, opts.IsLastOffset)
+	log.Info("Resolving ancient pruner offset", "isLastOffset", opts.IsLastOffset, "offset", offset)
+
 	// Create the idle freezer instance. If the given ancient directory is empty,
 	// in-memory chain freezer is used (e.g. dev mode); otherwise the regular
 	// file-based freezer is created.
@@ -274,7 +302,7 @@ func Open(db ethdb.KeyValueStore, opts OpenOptions) (ethdb.Database, error) {
 	if chainFreezerDir != "" {
 		chainFreezerDir = resolveChainFreezerDir(chainFreezerDir)
 	}
-	frdb, err := newChainFreezer(chainFreezerDir, opts.Era, opts.MetricsNamespace, opts.ReadOnly)
+	frdb, err := newChainFreezer(chainFreezerDir, opts.Era, opts.MetricsNamespace, opts.ReadOnly, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +425,7 @@ func Open(db ethdb.KeyValueStore, opts OpenOptions) (ethdb.Database, error) {
 		}
 	}
 	// Freezer is consistent with the key-value database, permit combining the two
-	if !opts.ReadOnly {
+	if !opts.DisableFreeze {
 		frdb.wg.Add(1)
 
 		go func() {

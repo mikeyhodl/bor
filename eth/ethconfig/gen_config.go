@@ -59,7 +59,7 @@ func (c Config) MarshalJSON() ([]byte, error) {
 		RPCReturnDataLimit      uint64
 		RPCEVMTimeout           time.Duration
 		RPCTxFeeCap             float64
-		OverrideOsaka           *uint64 `toml:",omitempty"`
+		OverrideOsaka           *big.Int `toml:",omitempty"`
 		HeimdallURL             string
 		HeimdallTimeout         time.Duration
 		WithoutHeimdall         bool
@@ -173,7 +173,7 @@ func (c *Config) UnmarshalJSON(input []byte) error {
 		RPCReturnDataLimit      *uint64
 		RPCEVMTimeout           *time.Duration
 		RPCTxFeeCap             *float64
-		OverrideOsaka           *uint64 `toml:",omitempty"`
+		OverrideOsaka           *big.Int `toml:",omitempty"`
 		HeimdallURL             *string
 		HeimdallTimeout         *time.Duration
 		WithoutHeimdall         *bool

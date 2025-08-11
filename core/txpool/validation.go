@@ -178,7 +178,7 @@ func validateBlobTx(tx *types.Transaction, head *types.Header, opts *ValidationO
 		return err
 	}
 	// Fork-specific sidecar checks, including proof verification.
-	if opts.Config.IsOsaka(head.Number, head.Time) {
+	if opts.Config.IsOsaka(head.Number) {
 		return validateBlobSidecarOsaka(sidecar, hashes)
 	}
 	return validateBlobSidecarLegacy(sidecar, hashes)

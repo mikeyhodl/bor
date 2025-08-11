@@ -39,6 +39,8 @@ type DatabaseOptions struct {
 	Cache            int    // the capacity(in megabytes) of the data caching
 	Handles          int    // number of files to be open simultaneously
 	ReadOnly         bool   // if true, no writes can be performed
+	DisableFreeze    bool   // if true, the freezer is not started
+	IsLastOffset     bool   // if true, the freezer will use the last offset for pruning
 }
 
 type internalOpenOptions struct {
