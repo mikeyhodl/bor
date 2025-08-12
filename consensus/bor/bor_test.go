@@ -13,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/triedb"
 )
@@ -69,7 +68,7 @@ func TestGenesisContractChange(t *testing.T) {
 	statedb, err := state.New(genesis.Root(), state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
 	require.NoError(t, err)
 
-	chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, genspec, nil, b, vm.Config{}, nil, nil, nil)
+	chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), genspec, b, core.DefaultConfig())
 	require.NoError(t, err)
 
 	addBlock := func(root common.Hash, num int64) (common.Hash, *state.StateDB) {

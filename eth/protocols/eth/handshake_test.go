@@ -28,7 +28,7 @@ import (
 )
 
 // Tests that handshake failures are detected and reported correctly.
-func TestHandshake67(t *testing.T) { testHandshake(t, ETH67) }
+func TestHandshake69(t *testing.T) { testHandshake(t, ETH69) }
 func TestHandshake68(t *testing.T) { testHandshake(t, ETH68) }
 
 func testHandshake(t *testing.T, protocol uint) {
@@ -41,8 +41,8 @@ func testHandshake(t *testing.T, protocol uint) {
 	var (
 		genesis = backend.chain.Genesis()
 		head    = backend.chain.CurrentBlock()
-		td      = backend.chain.GetTd(head.Hash(), head.Number.Uint64())
-		forkID  = forkid.NewID(backend.chain.Config(), backend.chain.Genesis(), backend.chain.CurrentHeader().Number.Uint64(), backend.chain.CurrentHeader().Time)
+		// td      = backend.chain.GetTd(head.Hash(), head.Number.Uint64())
+		forkID = forkid.NewID(backend.chain.Config(), backend.chain.Genesis(), backend.chain.CurrentHeader().Number.Uint64(), backend.chain.CurrentHeader().Time)
 	)
 
 	tests := []struct {

@@ -36,6 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core/history"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -46,6 +47,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethdb/pebble"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -1519,7 +1521,8 @@ func testReorgSideEvent(t *testing.T, scheme string) {
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
-	blockchain, _ := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	defaultConfig := DefaultConfig().WithStateScheme(scheme)
+	blockchain, _ := NewBlockChain(rawdb.NewMemoryDatabase(), gspec, ethash.NewFaker(), defaultConfig)
 	defer blockchain.Stop()
 
 	_, chain, _ := GenerateChainWithGenesis(gspec, ethash.NewFaker(), 3, func(i int, gen *BlockGen) {})
@@ -2103,18 +2106,18 @@ func testInsertReceiptChainRollback(t *testing.T, scheme string) {
 		t.Fatal("processing side chain failed:", err)
 	}
 	t.Log("sidechain head:", tmpChain.CurrentBlock().Number, tmpChain.CurrentBlock().Hash())
-	sidechainReceipts := make([]types.Receipts, len(sideblocks))
+	sidechainReceipts := make([]rlp.RawValue, len(sideblocks))
 	for i, block := range sideblocks {
-		sidechainReceipts[i] = tmpChain.GetReceiptsByHash(block.Hash())
+		sidechainReceipts[i] = tmpChain.GetReceiptsRLP(block.Hash())
 	}
 	// Get the canon chain receipts.
 	if _, err := tmpChain.InsertChain(canonblocks); err != nil {
 		t.Fatal("processing canon chain failed:", err)
 	}
 	t.Log("canon head:", tmpChain.CurrentBlock().Number, tmpChain.CurrentBlock().Hash())
-	canonReceipts := make([]types.Receipts, len(canonblocks))
+	canonReceipts := make([]rlp.RawValue, len(canonblocks))
 	for i, block := range canonblocks {
-		canonReceipts[i] = tmpChain.GetReceiptsByHash(block.Hash())
+		canonReceipts[i] = tmpChain.GetReceiptsRLP(block.Hash())
 	}
 
 	// Set up a BlockChain that uses the ancient store.
@@ -2123,8 +2126,8 @@ func testInsertReceiptChainRollback(t *testing.T, scheme string) {
 		t.Fatalf("failed to create temp freezer db: %v", err)
 	}
 	defer ancientDb.Close()
-
-	ancientChain, _ := NewBlockChain(ancientDb, DefaultCacheConfigWithScheme(scheme), gspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil, nil)
+	defaultConfig := DefaultConfig().WithStateScheme(scheme)
+	ancientChain, _ := NewBlockChain(ancientDb, gspec, ethash.NewFaker(), defaultConfig)
 	defer ancientChain.Stop()
 
 	// Import the canonical header chain.

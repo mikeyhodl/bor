@@ -425,17 +425,11 @@ func (f *chainFreezer) Ancient(kind string, number uint64) ([]byte, error) {
 	return nil, errUnknownTable
 }
 
-// ReadAncients executes an operation while preventing mutations to the freezer,
-// i.e. if fn performs multiple reads, they will be consistent with each other.
-func (f *chainFreezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {
-	if store, ok := f.ancients.(*Freezer); ok {
-		store.writeLock.Lock()
-		defer store.writeLock.Unlock()
-	}
-	return fn(f)
-}
-
 // Methods below are just pass-through to the underlying ancient store.
+
+func (f *chainFreezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {
+	return f.ancients.ReadAncients(fn)
+}
 
 func (f *chainFreezer) Ancients() (uint64, error) {
 	return f.ancients.Ancients()
@@ -467,12 +461,12 @@ func (f *chainFreezer) TruncateTail(items uint64) (uint64, error) {
 
 // ItemAmountInAncient returns the actual length of current ancientDB.
 func (f *chainFreezer) ItemAmountInAncient() (uint64, error) {
-	panic("ItemAmountInAncient should not be called on chain freezer")
+	return f.ancients.ItemAmountInAncient()
 }
 
 // AncientOffSet returns the offset of current ancientDB.
 func (f *chainFreezer) AncientOffSet() uint64 {
-	panic("AncientOffSet should not be called on chain freezer")
+	return f.ancients.AncientOffSet()
 }
 
 func (f *chainFreezer) SyncAncient() error {
