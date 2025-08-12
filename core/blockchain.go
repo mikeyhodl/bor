@@ -1858,7 +1858,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				}
 			}
 			// Write all the data out into the database
-			// TODO: Which of the two?
+			// TODO v1.16.1: Which of the two?
 			rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
 			rawdb.WriteBlock(batch, block)
 			rawdb.WriteRawReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])

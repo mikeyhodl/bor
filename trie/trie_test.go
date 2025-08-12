@@ -846,7 +846,6 @@ func makeAccounts(size int) (addresses [][20]byte, accounts [][]byte) {
 		random.Read(data)
 		copy(addresses[i][:], data)
 	}
-
 	accounts = make([][]byte, len(addresses))
 	for i := 0; i < len(accounts); i++ {
 		var (
@@ -870,7 +869,6 @@ func makeAccounts(size int) (addresses [][20]byte, accounts [][]byte) {
 		})
 		accounts[i] = data
 	}
-
 	return addresses, accounts
 }
 

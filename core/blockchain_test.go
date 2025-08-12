@@ -2060,6 +2060,14 @@ func testBlockchainRecovery(t *testing.T, scheme string) {
 	defer ancientDb.Close()
 	ancient, _ := NewBlockChain(ancientDb, gspec, ethash.NewFaker(), DefaultConfig().WithStateScheme(scheme))
 
+	headers := make([]*types.Header, len(blocks))
+	for i, block := range blocks {
+		headers[i] = block.Header()
+	}
+	if n, err := ancient.InsertHeaderChain(headers); err != nil {
+		t.Fatalf("failed to insert header %d: %v", n, err)
+	}
+
 	if n, err := ancient.InsertReceiptChain(blocks, types.EncodeBlockReceiptLists(receipts), uint64(3*len(blocks)/4)); err != nil {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}

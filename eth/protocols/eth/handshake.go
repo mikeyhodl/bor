@@ -37,14 +37,6 @@ const (
 // Handshake executes the eth protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis blocks.
 func (p *Peer) Handshake(networkID uint64, chain *core.BlockChain, rangeMsg BlockRangeUpdatePacket) error {
-	// TODO v1.16.1: Take into account terminal difficulty
-	// var (
-	// 	genesis = handler.chain.Genesis()
-	// 	head    = handler.chain.CurrentBlock()
-	// 	td      = handler.chain.GetTd(head.Hash(), head.Number.Uint64())
-	// )
-	// if err := sink.Handshake(1, td, head.Hash(), genesis.Hash(), forkid.NewIDWithChain(handler.chain), forkid.NewFilter(handler.chain)); err != nil {
-
 	switch p.version {
 	case ETH69:
 		return p.handshake69(networkID, chain, rangeMsg)

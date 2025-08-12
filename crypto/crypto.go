@@ -71,7 +71,7 @@ type KeccakState interface {
 
 // NewKeccakState creates a new KeccakState
 func NewKeccakState() KeccakState {
-	return hasherPool.Get().(KeccakState)
+	return sha3.NewLegacyKeccak256().(KeccakState)
 }
 
 // PutKeccakState puts the KeccakState back into the pool.
