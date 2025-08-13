@@ -350,7 +350,6 @@ type BlockChain struct {
 	parallelSpeculativeProcesses int       // Number of parallel speculative processes
 	enforceParallelProcessor     bool
 	forker                       *ForkChoice
-	vmConfig                     vm.Config
 	logger                       *tracing.Hooks
 
 	// Bor related changes
@@ -419,8 +418,9 @@ func NewBlockChain(db ethdb.Database, genesis *Genesis, engine consensus.Engine,
 	if err != nil {
 		return nil, err
 	}
-	bc.forker = NewForkChoice(bc, cfg.ShouldPreserve, cfg.Checker)
 	bc.flushInterval.Store(int64(cfg.TrieTimeLimit))
+	bc.forker = NewForkChoice(bc, cfg.ShouldPreserve, cfg.Checker)
+
 	bc.statedb = state.NewDatabase(bc.triedb, nil)
 	bc.validator = NewBlockValidator(chainConfig, bc)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc.hc)
@@ -694,7 +694,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 		go func() {
 			pstart := time.Now()
-			res, err := bc.parallelProcessor.Process(block, statedb, bc.vmConfig, ctx)
+			res, err := bc.parallelProcessor.Process(block, statedb, bc.cfg.VmConfig, ctx)
 			blockExecutionParallelTimer.UpdateSince(pstart)
 			if err == nil {
 				vstart := time.Now()
@@ -713,7 +713,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 		go func() {
 			pstart := time.Now()
-			res, err := bc.processor.Process(block, statedb, bc.vmConfig, ctx)
+			res, err := bc.processor.Process(block, statedb, bc.cfg.VmConfig, ctx)
 			blockExecutionSerialTimer.UpdateSince(pstart)
 			if err == nil {
 				vstart := time.Now()
@@ -1283,12 +1283,13 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 		// Ignore the error here since light client won't hit this path
 		frozen, _ := bc.db.Ancients()
 		if num+1 <= frozen {
-			// The chain segment, such as the block header, canonical hash,
-			// body, and receipt, will be removed from the ancient store
-			// in one go.
-			//
-			// The hash-to-number mapping in the key-value store will be
-			// removed by the hc.SetHead function.
+			// Truncate all relative data(header, total difficulty, body, receipt
+			// and canonical hash) from ancient store.
+			if _, err := bc.db.TruncateHead(num); err != nil {
+				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
+			}
+			// Remove the hash <-> number mapping from the active store.
+			rawdb.DeleteHeaderNumber(db, hash)
 		} else {
 			// Remove the associated body and receipts from the key-value store.
 			// The header, hash-to-number mapping, and canonical hash will be
@@ -2507,7 +2508,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 			// Generate witnesses either if we're self-testing, or if it's the
 			// only block being inserted. A bit crude, but witnesses are huge,
 			// so we refuse to make an entire chain of them.
-			if bc.vmConfig.StatelessSelfValidation || (makeWitness && len(chain) == 1) {
+			if bc.cfg.VmConfig.StatelessSelfValidation || (makeWitness && len(chain) == 1) {
 				witness, err = stateless.NewWitness(block.Header(), bc)
 				if err != nil {
 					return nil, it.index, err
@@ -2743,7 +2744,7 @@ func (bc *BlockChain) processBlock(block *types.Block, statedb *state.StateDB, s
 
 	// Process block using the parent state as reference point
 	pstart := time.Now()
-	res, err := bc.processor.Process(block, statedb, bc.vmConfig, context.Background())
+	res, err := bc.processor.Process(block, statedb, bc.cfg.VmConfig, context.Background())
 	if err != nil {
 		bc.reportBlock(block, res, err)
 		return nil, err
@@ -3486,76 +3487,6 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header) (int, error) {
 
 func (bc *BlockChain) GetChainConfig() *params.ChainConfig {
 	return bc.chainConfig
-}
-
-// InsertHeadersBeforeCutoff inserts the given headers into the ancient store
-// as they are claimed older than the configured chain cutoff point. All the
-// inserted headers are regarded as canonical and chain reorg is not supported.
-func (bc *BlockChain) InsertHeadersBeforeCutoff(headers []*types.Header) (int, error) {
-	if len(headers) == 0 {
-		return 0, nil
-	}
-	// TODO(rjl493456442): Headers before the configured cutoff have already
-	// been verified by the hash of cutoff header. Theoretically, header validation
-	// could be skipped here.
-	if n, err := bc.hc.ValidateHeaderChain(headers); err != nil {
-		return n, err
-	}
-	if !bc.chainmu.TryLock() {
-		return 0, errChainStopped
-	}
-	defer bc.chainmu.Unlock()
-
-	// Initialize the ancient store with genesis block if it's empty.
-	var (
-		frozen, _ = bc.db.Ancients()
-		first     = headers[0].Number.Uint64()
-	)
-	if first == 1 && frozen == 0 {
-		td := bc.genesisBlock.Difficulty()
-		_, err := rawdb.WriteAncientBlocks(bc.db, []*types.Block{bc.genesisBlock}, []rlp.RawValue{rlp.EmptyList}, []rlp.RawValue{rlp.EmptyList}, td)
-		if err != nil {
-			log.Error("Error writing genesis to ancients", "err", err)
-			return 0, err
-		}
-		log.Info("Wrote genesis to ancient store")
-	} else if frozen != first {
-		return 0, fmt.Errorf("headers are gapped with the ancient store, first: %d, ancient: %d", first, frozen)
-	}
-
-	// Write headers to the ancient store, with block bodies and receipts set to nil
-	// to ensure consistency across tables in the freezer.
-	_, err := rawdb.WriteAncientHeaderChain(bc.db, headers)
-	if err != nil {
-		return 0, err
-	}
-	// Sync the ancient store explicitly to ensure all data has been flushed to disk.
-	if err := bc.db.SyncAncient(); err != nil {
-		return 0, err
-	}
-	// Write hash to number mappings
-	batch := bc.db.NewBatch()
-	for _, header := range headers {
-		rawdb.WriteHeaderNumber(batch, header.Hash(), header.Number.Uint64())
-	}
-	// Write head header and head snap block flags
-	last := headers[len(headers)-1]
-	rawdb.WriteHeadHeaderHash(batch, last.Hash())
-	rawdb.WriteHeadFastBlockHash(batch, last.Hash())
-	if err := batch.Write(); err != nil {
-		return 0, err
-	}
-	// Truncate the useless chain segment (zero bodies and receipts) in the
-	// ancient store.
-	if _, err := bc.db.TruncateTail(last.Number.Uint64() + 1); err != nil {
-		return 0, err
-	}
-	// Last step update all in-memory markers
-	bc.hc.currentHeader.Store(last)
-	bc.currentSnapBlock.Store(last)
-	headHeaderGauge.Update(last.Number.Int64())
-	headFastBlockGauge.Update(last.Number.Int64())
-	return 0, nil
 }
 
 // SetBlockValidatorAndProcessorForTesting sets the current validator and processor.
