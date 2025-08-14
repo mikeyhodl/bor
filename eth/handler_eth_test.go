@@ -263,7 +263,11 @@ func testRecvTransactions(t *testing.T, protocol uint) {
 		return eth.Handle((*ethHandler)(handler.handler), peer)
 	})
 	// Run the handshake locally to avoid spinning up a source handler
-	if err := src.Handshake(1, handler.chain, eth.BlockRangeUpdatePacket{}); err != nil {
+	if err := src.Handshake(1, handler.chain, eth.BlockRangeUpdatePacket{
+		EarliestBlock:   0,
+		LatestBlock:     handler.chain.CurrentBlock().Number.Uint64(),
+		LatestBlockHash: handler.chain.CurrentBlock().Hash(),
+	}); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// Send the transaction to the sink and verify that it's added to the tx pool
@@ -319,7 +323,11 @@ func testSendTransactions(t *testing.T, protocol uint) {
 		return eth.Handle((*ethHandler)(handler.handler), peer)
 	})
 	// Run the handshake locally to avoid spinning up a source handler
-	if err := sink.Handshake(1, handler.chain, eth.BlockRangeUpdatePacket{}); err != nil {
+	if err := sink.Handshake(1, handler.chain, eth.BlockRangeUpdatePacket{
+		EarliestBlock:   0,
+		LatestBlock:     handler.chain.CurrentBlock().Number.Uint64(),
+		LatestBlockHash: handler.chain.CurrentBlock().Hash(),
+	}); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// After the handshake completes, the source handler should stream the sink
@@ -467,7 +475,11 @@ func testSendTransactionAnnouncementsOnly(t *testing.T, protocol uint) {
 		return eth.Handle((*ethHandler)(source.handler), peer)
 	})
 
-	if err := sinkPeer.Handshake(1, source.chain, eth.BlockRangeUpdatePacket{}); err != nil {
+	if err := sinkPeer.Handshake(1, source.chain, eth.BlockRangeUpdatePacket{
+		EarliestBlock:   0,
+		LatestBlock:     source.chain.CurrentBlock().Number.Uint64(),
+		LatestBlockHash: source.chain.CurrentBlock().Hash(),
+	}); err != nil {
 		t.Fatalf("failed to run protocol handshake: %v", err)
 	}
 
@@ -640,7 +652,11 @@ func testBroadcastMalformedBlock(t *testing.T, protocol uint) {
 		return eth.Handle((*ethHandler)(source.handler), peer)
 	})
 
-	if err := sink.Handshake(1, source.chain, eth.BlockRangeUpdatePacket{}); err != nil {
+	if err := sink.Handshake(1, source.chain, eth.BlockRangeUpdatePacket{
+		EarliestBlock:   1,
+		LatestBlock:     source.chain.CurrentBlock().Number.Uint64(),
+		LatestBlockHash: source.chain.CurrentBlock().Hash(),
+	}); err != nil {
 		t.Fatalf("failed to run protocol handshake")
 	}
 	// After the handshake completes, the source handler should stream the sink
