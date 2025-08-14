@@ -55,10 +55,6 @@ func (h *testEthHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 		h.blockBroadcasts.Send(packet.Block)
 		return nil
 
-	case *eth.NewPooledTransactionHashesPacket67:
-		h.txAnnounces.Send(([]common.Hash)(*packet))
-		return nil
-
 	case *eth.NewPooledTransactionHashesPacket:
 		h.txAnnounces.Send(packet.Hashes)
 		return nil
@@ -344,7 +340,7 @@ func testSendTransactions(t *testing.T, protocol uint) {
 	seen := make(map[common.Hash]struct{})
 	for len(seen) < len(insert) {
 		switch protocol {
-		case 67, 68:
+		case 69, 68:
 			select {
 			case hashes := <-anns:
 				for _, hash := range hashes {
@@ -502,7 +498,7 @@ func testSendTransactionAnnouncementsOnly(t *testing.T, protocol uint) {
 	timeout := false
 	for len(seen) < len(txs) && !timeout {
 		switch protocol {
-		case 67, 68:
+		case 69, 68:
 			select {
 			case hashes := <-anns:
 				for _, hash := range hashes {
