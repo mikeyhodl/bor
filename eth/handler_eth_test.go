@@ -627,7 +627,6 @@ func testBroadcastBlock(t *testing.T, peers, bcasts int) {
 // Tests that a propagated malformed block (uncles or transactions don't match
 // with the hashes in the header) gets discarded and not broadcast forward.
 func TestBroadcastMalformedBlock69(t *testing.T) {
-	t.Skip("FIXME: this test is broken since upstream v1.16.1, fix it")
 	testBroadcastMalformedBlock(t, eth.ETH69)
 }
 
