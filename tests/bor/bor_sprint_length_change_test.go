@@ -48,8 +48,6 @@ const (
 
 // Sprint length change tests
 func TestValidatorsBlockProduction(t *testing.T) {
-	t.Skip("FIXME")
-
 	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelInfo, true)))
 
 	_, err := fdlimit.Raise(2048)
