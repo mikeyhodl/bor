@@ -35,6 +35,7 @@ var amoyTestnet = &Chain{
 				IndoreBlock:    big.NewInt(73100),
 				AhmedabadBlock: big.NewInt(11865856),
 				BhilaiBlock:    big.NewInt(22765056),
+				RioBlock:       big.NewInt(26201856),
 				StateSyncConfirmationDelay: map[string]uint64{
 					"0": 128,
 				},

@@ -22,6 +22,7 @@
         "indoreBlock": 73100,
         "ahmedabadBlock": 11865856,
         "bhilaiBlock": 22765056,
+        "rioBlock": 26201856,
         "stateSyncConfirmationDelay": {
           "0": 128
         },
