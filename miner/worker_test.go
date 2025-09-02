@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -397,6 +398,7 @@ func getFakeBorFromConfig(t *testing.T, chainConfig *params.ChainConfig) (consen
 	heimdallClientMock.EXPECT().GetSpan(gomock.Any(), uint64(0)).Return(&span0, nil).AnyTimes()
 	heimdallClientMock.EXPECT().GetLatestSpan(gomock.Any()).Return(&span0, nil).AnyTimes()
 	heimdallClientMock.EXPECT().FetchMilestone(gomock.Any()).Return(&milestone.Milestone{}, nil).AnyTimes()
+	heimdallClientMock.EXPECT().FetchStatus(gomock.Any()).Return(&ctypes.SyncInfo{CatchingUp: false}, nil).AnyTimes()
 	heimdallClientMock.EXPECT().Close().AnyTimes()
 
 	contractMock := bor.NewMockGenesisContract(ctrl)
@@ -710,7 +712,7 @@ func testGetSealingWork(t *testing.T, chainConfig *params.ChainConfig, engine co
 	}
 }
 
-// nolint: paralleltest
+// nolint:paralleltest
 // TestCommitInterruptExperimentBor_NormalFlow tests the commit interrupt experiment for bor consensus by inducing
 // an artificial delay at transaction level. It runs the normal mining flow triggered via new head.
 func TestCommitInterruptExperimentBor_NormalFlow(t *testing.T) {
@@ -723,7 +725,7 @@ func TestCommitInterruptExperimentBor_NormalFlow(t *testing.T) {
 	testCommitInterruptExperimentBor(t, 100, 10)
 }
 
-// nolint: thelper
+// nolint:thelper
 // testCommitInterruptExperimentBor is a helper function for testing the commit interrupt experiment for bor consensus.
 func testCommitInterruptExperimentBor(t *testing.T, delay uint, txCount int) {
 	var (
@@ -847,7 +849,7 @@ func TestCommitInterruptExperimentBor_NewTxFlow(t *testing.T) {
 	assert.Equal(t, len(w.current.txs), 2)
 }
 
-// nolint: paralleltest
+// nolint:paralleltest
 // TestCommitInterruptPending tests setting interrupting the block building very early on
 // in the fill transactions phase. The test is just to ensure that commit work works when
 // it started the block production late.
@@ -1009,6 +1011,7 @@ func BenchmarkBorMining(b *testing.B) {
 	}, nil).AnyTimes()
 
 	heimdallClientMock := mocks.NewMockIHeimdallClient(ctrl)
+	heimdallClientMock.EXPECT().FetchStatus(gomock.Any()).Return(&ctypes.SyncInfo{CatchingUp: false}, nil).AnyTimes()
 	heimdallWSClient := mocks.NewMockIHeimdallWSClient(ctrl)
 
 	heimdallClientMock.EXPECT().Close().Times(1)
@@ -1087,7 +1090,7 @@ func BenchmarkBorMining(b *testing.B) {
 
 // uses core.NewParallelBlockChain to use the dependencies present in the block header
 // params.BorUnittestChainConfig contains the NapoliBlock as big.NewInt(5), so the first 4 blocks will not have metadata.
-// nolint: gocognit
+// nolint:gocognit
 func BenchmarkBorMiningBlockSTMMetadata(b *testing.B) {
 	chainConfig := params.BorUnittestChainConfig
 
@@ -1108,6 +1111,7 @@ func BenchmarkBorMiningBlockSTMMetadata(b *testing.B) {
 	}, nil).AnyTimes()
 
 	heimdallClientMock := mocks.NewMockIHeimdallClient(ctrl)
+	heimdallClientMock.EXPECT().FetchStatus(gomock.Any()).Return(&ctypes.SyncInfo{CatchingUp: false}, nil).AnyTimes()
 	heimdallWSClient := mocks.NewMockIHeimdallWSClient(ctrl)
 	heimdallClientMock.EXPECT().Close().Times(1)
 
@@ -1221,7 +1225,7 @@ func TestVeblopTimerTriggersStaleBlock(t *testing.T) {
 	// Enable VeBlop from genesis
 	chainConfig = &params.ChainConfig{}
 	*chainConfig = *params.BorUnittestChainConfig
-	chainConfig.Bor.VeBlopBlock = big.NewInt(0)
+	chainConfig.Bor.RioBlock = big.NewInt(0)
 
 	engine, ctrl = getFakeBorFromConfig(t, chainConfig)
 	defer engine.Close()
@@ -1290,7 +1294,7 @@ func TestVeblopTimerSkipsWhenPendingTasks(t *testing.T) {
 	// Enable VeBlop from genesis
 	chainConfig = &params.ChainConfig{}
 	*chainConfig = *params.BorUnittestChainConfig
-	chainConfig.Bor.VeBlopBlock = big.NewInt(0)
+	chainConfig.Bor.RioBlock = big.NewInt(0)
 
 	engine, ctrl = getFakeBorFromConfig(t, chainConfig)
 	defer engine.Close()

@@ -91,9 +91,8 @@ var (
 	storageCacheHitPrefetchMeter  = metrics.NewRegisteredMeter("chain/storage/reads/cache/prefetch/hit", nil)
 	storageCacheMissPrefetchMeter = metrics.NewRegisteredMeter("chain/storage/reads/cache/prefetch/miss", nil)
 
-	accountReadSingleTimer = metrics.NewRegisteredResettingTimer("chain/account/single/reads", nil) //nolint:unused
-	storageReadSingleTimer = metrics.NewRegisteredResettingTimer("chain/storage/single/reads", nil) //nolint:unused
-
+	accountReadSingleTimer   = metrics.NewRegisteredResettingTimer("chain/account/single/reads", nil) //nolint:revive,unused
+	storageReadSingleTimer   = metrics.NewRegisteredResettingTimer("chain/storage/single/reads", nil) //nolint:revive,unused
 	snapshotCommitTimer      = metrics.NewRegisteredResettingTimer("chain/snapshot/commits", nil)
 	triedbCommitTimer        = metrics.NewRegisteredResettingTimer("chain/triedb/commits", nil)
 	snapshotAccountReadTimer = metrics.NewRegisteredResettingTimer("chain/snapshot/account/reads", nil)
@@ -3844,9 +3843,9 @@ func (bc *BlockChain) verifyPendingHeaders() {
 
 	chainConfig := bc.Config()
 
-	// We don't need to verify headers before VeBlop
-	if chainConfig.Bor == nil || !chainConfig.Bor.IsVeBlop(currentHead.Number) {
-		return // VeBlop is not enabled yet
+	// We don't need to verify headers before Rio
+	if chainConfig.Bor == nil || !chainConfig.Bor.IsRio(currentHead.Number) {
+		return // Rio is not enabled yet
 	}
 
 	// Collect headers from finalized block + 1 to current head

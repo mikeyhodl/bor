@@ -194,7 +194,7 @@ func CalcProducerDelay(number uint64, succession int, c *params.BorConfig) uint6
 	delay := c.CalculatePeriod(number)
 
 	// Since there is only one producer in veblop, we don't need to add producer delay and backup multiplier
-	if c.IsVeBlop(big.NewInt(int64(number))) {
+	if c.IsRio(big.NewInt(int64(number))) {
 		return delay
 	}
 
@@ -528,7 +528,7 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 }
 
 // snapshot retrieves the authorization snapshot at a given point in time.
-// nolint: gocognit
+// nolint:gocognit
 func (c *Bor) snapshot(chain consensus.ChainHeaderReader, targetHeader *types.Header, parents []*types.Header, checkNewSpan bool) (snap *Snapshot, err error) {
 	// Search for a snapshot in memory or on disk for checkpoints
 	signer := common.BytesToAddress(c.authorizedSigner.Load().signer.Bytes())
@@ -543,7 +543,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, targetHeader *types.He
 		return snapshot, nil
 	}
 
-	if c.config.IsVeBlop(targetHeader.Number) {
+	if c.config.IsRio(targetHeader.Number) {
 		return c.getVeBlopSnapshot(chain, targetHeader, parents, checkNewSpan)
 	}
 
@@ -737,21 +737,7 @@ func (c *Bor) performSpanCheck(chain consensus.ChainHeaderReader, targetHeader *
 		log.Info("Span check complete", "foundNewSpan", foundNewSpan)
 
 		return nil
-	} else if missingTargetSignature == nil && targetHeaderAuthor != parentHeaderAuthor {
-		log.Info("Updating latest span due to different author", "target block", targetHeader.Number.Uint64(), "parentHeader", targetHeader.ParentHash, "parentHeaderAuthor", parentHeaderAuthor, "targetHeaderAuthor", targetHeaderAuthor)
-
-		// We don't want to wait for a new span forever if the target header author is different from the parent header author, because it would lead to a deadlock if the header is signed by a malicious producer who is not in the validator set.
-		foundNewSpan, err := c.spanStore.waitForNewSpan(targetHeader.Number.Uint64(), parentHeaderAuthor, veblopBlockTimeout)
-		if err != nil {
-			log.Warn("Error while waiting for new span", "error", err)
-			return err
-		}
-
-		log.Info("Span check complete", "foundNewSpan", foundNewSpan)
-
-		return nil
 	}
-
 	return nil
 }
 
@@ -867,7 +853,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header) e
 	header.Extra = header.Extra[:types.ExtraVanityLength]
 
 	// get validator set if number
-	if IsSprintStart(number+1, c.config.CalculateSprint(number)) && !c.config.IsVeBlop(header.Number) {
+	if IsSprintStart(number+1, c.config.CalculateSprint(number)) && !c.config.IsRio(header.Number) {
 		span, err := c.spanStore.spanByBlockNumber(context.Background(), number+1)
 		if err != nil {
 			return err
@@ -982,7 +968,7 @@ func (c *Bor) Finalize(chain consensus.ChainHeaderReader, header *types.Header, 
 		start := time.Now()
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 		// check and commit span
-		if !c.config.IsVeBlop(header.Number) {
+		if !c.config.IsRio(header.Number) {
 			if err := c.checkAndCommitSpan(wrappedState, header, cx); err != nil {
 				log.Error("Error while committing span", "error", err)
 				return
@@ -1074,7 +1060,7 @@ func (c *Bor) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *typ
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		// check and commit span
-		if !c.config.IsVeBlop(header.Number) {
+		if !c.config.IsRio(header.Number) {
 			if err = c.checkAndCommitSpan(state, header, cx); err != nil {
 				log.Error("Error while committing span", "error", err)
 				return nil, err
@@ -1479,6 +1465,10 @@ func (c *Bor) CommitStates(
 		"to", to.Format(time.RFC3339))
 
 	var eventRecords []*clerk.EventRecordWithTime
+
+	// Wait for heimdall to be synced before fetching state sync events
+	c.spanStore.waitUntilHeimdallIsSynced(context.Background())
+
 	eventRecords, err = c.HeimdallClient.StateSyncEvents(context.Background(), from, to.Unix())
 	if err != nil {
 		log.Error("Error occurred when fetching state sync events", "fromID", from, "to", to.Unix(), "err", err)

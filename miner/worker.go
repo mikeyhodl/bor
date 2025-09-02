@@ -546,7 +546,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 
 		case <-veblopTimer.C:
 			currentBlock := w.chain.CurrentBlock()
-			if w.chainConfig.Bor == nil || !w.chainConfig.Bor.IsVeBlop(currentBlock.Number) {
+			if w.chainConfig.Bor == nil || !w.chainConfig.Bor.IsRio(currentBlock.Number) {
 				veblopTimer.Reset(veblopTimeout)
 				continue
 			}
@@ -615,7 +615,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 // mainLoop is responsible for generating and submitting sealing work based on
 // the received event. It can support two modes: automatically generate task and
 // submit it or return task according to given parameters for various proposes.
-// nolint: gocognit, contextcheck
+// nolint:gocognit, contextcheck
 func (w *worker) mainLoop() {
 	defer w.wg.Done()
 	defer w.txsSub.Unsubscribe()
@@ -1560,11 +1560,11 @@ func (w *worker) commitWork(interrupt *atomic.Int32, noempty bool, timestamp int
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
 	// If the block is a veblop block, we will never try to create a commit for an empty block.
-	var isVeblop bool
+	var isRio bool
 	if w.chainConfig.Bor != nil {
-		isVeblop = w.chainConfig.Bor.IsVeBlop(work.header.Number)
+		isRio = w.chainConfig.Bor.IsRio(work.header.Number)
 	}
-	if !noempty && !w.noempty.Load() && !isVeblop {
+	if !noempty && !w.noempty.Load() && !isRio {
 		_ = w.commit(work.copy(), nil, false, start)
 	}
 	// Fill pending transactions from the txpool into the block.
