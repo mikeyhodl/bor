@@ -29,7 +29,9 @@ import (
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/eth"
@@ -794,6 +796,60 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 		*ow, _ = rlp.EncodeToBytes(proofs)
 	}
 	return engine.PayloadStatusV1{Status: engine.VALID, Witness: ow, LatestValidHash: &hash}, nil
+}
+
+func (api *ConsensusAPI) executeStatelessPayload(params engine.ExecutableData, versionedHashes []common.Hash, beaconRoot *common.Hash, requests [][]byte, opaqueWitness hexutil.Bytes) (engine.StatelessPayloadStatusV1, error) {
+	log.Trace("Engine API request received", "method", "ExecuteStatelessPayload", "number", params.Number, "hash", params.BlockHash)
+	block, err := engine.ExecutableDataToBlockNoHash(params, versionedHashes, beaconRoot, requests)
+	if err != nil {
+		bgu := "nil"
+		if params.BlobGasUsed != nil {
+			bgu = strconv.Itoa(int(*params.BlobGasUsed))
+		}
+		ebg := "nil"
+		if params.ExcessBlobGas != nil {
+			ebg = strconv.Itoa(int(*params.ExcessBlobGas))
+		}
+		log.Warn("Invalid ExecuteStatelessPayload params",
+			"params.Number", params.Number,
+			"params.ParentHash", params.ParentHash,
+			"params.BlockHash", params.BlockHash,
+			"params.StateRoot", params.StateRoot,
+			"params.FeeRecipient", params.FeeRecipient,
+			"params.LogsBloom", common.PrettyBytes(params.LogsBloom),
+			"params.Random", params.Random,
+			"params.GasLimit", params.GasLimit,
+			"params.GasUsed", params.GasUsed,
+			"params.Timestamp", params.Timestamp,
+			"params.ExtraData", common.PrettyBytes(params.ExtraData),
+			"params.BaseFeePerGas", params.BaseFeePerGas,
+			"params.BlobGasUsed", bgu,
+			"params.ExcessBlobGas", ebg,
+			"len(params.Transactions)", len(params.Transactions),
+			"len(params.Withdrawals)", len(params.Withdrawals),
+			"beaconRoot", beaconRoot,
+			"len(requests)", len(requests),
+			"error", err)
+		errorMsg := err.Error()
+		return engine.StatelessPayloadStatusV1{Status: engine.INVALID, ValidationError: &errorMsg}, nil
+	}
+	witness := new(stateless.Witness)
+	if err := rlp.DecodeBytes(opaqueWitness, witness); err != nil {
+		log.Warn("Invalid ExecuteStatelessPayload witness", "err", err)
+		errorMsg := err.Error()
+		return engine.StatelessPayloadStatusV1{Status: engine.INVALID, ValidationError: &errorMsg}, nil
+	}
+	// Stash away the last update to warn the user if the beacon client goes offline
+	api.lastNewPayloadUpdate.Store(time.Now().Unix())
+
+	log.Trace("Executing block statelessly", "number", block.Number(), "hash", params.BlockHash)
+	stateRoot, receiptRoot, _, err := core.ExecuteStateless(api.eth.BlockChain().Config(), *api.eth.BlockChain().GetVMConfig(), block, witness, nil, api.eth.Engine(), nil)
+	if err != nil {
+		log.Warn("ExecuteStatelessPayload: execution failed", "err", err)
+		errorMsg := err.Error()
+		return engine.StatelessPayloadStatusV1{Status: engine.INVALID, ValidationError: &errorMsg}, nil
+	}
+	return engine.StatelessPayloadStatusV1{Status: engine.VALID, StateRoot: stateRoot, ReceiptsRoot: receiptRoot}, nil
 }
 
 // delayPayloadImport stashes the given block away for import at a later time,
