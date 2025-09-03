@@ -292,7 +292,7 @@ var (
 			},
 			Coinbase: map[string]string{
 				"0":        "0x0000000000000000000000000000000000000000",
-				"50000000": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0",
+				"49439808": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0",
 			},
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
@@ -337,7 +337,7 @@ var (
 			IndoreBlock:    big.NewInt(73100),
 			AhmedabadBlock: big.NewInt(11865856),
 			BhilaiBlock:    big.NewInt(22765056),
-			RioBlock:       big.NewInt(26201856),
+			RioBlock:       big.NewInt(26272256),
 			StateSyncConfirmationDelay: map[string]uint64{
 				"0": 128,
 			},
@@ -364,7 +364,7 @@ var (
 			},
 			Coinbase: map[string]string{
 				"0":        "0x0000000000000000000000000000000000000000",
-				"26201856": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0",
+				"26272256": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0",
 			},
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
