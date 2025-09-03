@@ -1007,3 +1007,11 @@ func (mr *MockBackendMockRecorder) UnprotectedAllowed() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnprotectedAllowed", reflect.TypeOf((*MockBackend)(nil).UnprotectedAllowed))
 }
+
+func (m *MockBackend) GetCanonicalReceipt(tx *types.Transaction, blockHash common.Hash, blockNumber, blockIndex uint64) (*types.Receipt, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCanonicalReceipt", tx, blockHash, blockNumber, blockIndex)
+	ret0, _ := ret[0].(*types.Receipt)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}

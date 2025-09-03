@@ -2148,10 +2148,10 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 		}
 
 		// Create peer with the full chain (has common blocks + additional blocks)
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
 
 		// Get peer connection
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		// Test finding ancestor - should find block at localBlocks-1
 		remoteHeight := uint64(len(chain.blocks) - 1)
@@ -2180,8 +2180,8 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 		}
 
 		// Create peer with the full chain
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		// Set floor very high so no common ancestor is found above it
 		remoteHeight := uint64(50)
@@ -2204,8 +2204,8 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 			tester.chain.InsertChain([]*types.Block{chain.blocks[i]}, false)
 		}
 
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		remoteHeight := uint64(len(chain.blocks) - 1)
 		floor := int64(localBlocks - 2) // Floor below the last common block so we can find it
@@ -2233,8 +2233,8 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 			tester.chain.InsertChain([]*types.Block{chain.blocks[i]}, false)
 		}
 
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		// Use a remote height that requires multiple batches
 		remoteHeight := uint64(len(chain.blocks) - 1)
@@ -2261,8 +2261,8 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 			tester.chain.InsertChain([]*types.Block{chain.blocks[i]}, false)
 		}
 
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		remoteHeight := uint64(5)
 		floor := int64(5) // Same as remote height
@@ -2281,8 +2281,8 @@ func TestFindAncestorStatelessSearch(t *testing.T) {
 		// Add first block to local chain
 		tester.chain.InsertChain([]*types.Block{chain.blocks[0]}, false)
 
-		peer := tester.newPeer("peer", eth.ETH67, chain.blocks)
-		peerConn := newPeerConnection("peer", eth.ETH67, peer, log.New("id", "peer"))
+		peer := tester.newPeer("peer", eth.ETH69, chain.blocks)
+		peerConn := newPeerConnection("peer", eth.ETH69, peer, log.New("id", "peer"))
 
 		remoteHeight := uint64(4)
 		floor := int64(-1) // Set floor below 0 so we can find block 0
