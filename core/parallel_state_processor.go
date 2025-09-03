@@ -265,7 +265,15 @@ var parallelizabilityTimer = metrics.NewRegisteredTimer("block/parallelizability
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
 // nolint:gocognit
-func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, author *common.Address, interruptCtx context.Context) (*ProcessResult, error) {
+func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, author *common.Address, interruptCtx context.Context) (processResult *ProcessResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("recovered from panic during parallel execution", "err", r)
+			processResult = nil
+			err = fmt.Errorf("panic during parallel execution: %v", r)
+		}
+	}()
+
 	var (
 		receipts    types.Receipts
 		header      = block.Header()
