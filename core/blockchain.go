@@ -716,6 +716,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 		go func() {
 			pstart := time.Now()
+			statedb.StartPrefetcher("chain", witness)
 			res, err := bc.parallelProcessor.Process(block, statedb, bc.cfg.VmConfig, nil, ctx)
 			blockExecutionParallelTimer.UpdateSince(pstart)
 			if err == nil {
@@ -735,6 +736,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 		go func() {
 			pstart := time.Now()
+			statedb.StartPrefetcher("chain", witness)
 			res, err := bc.processor.Process(block, statedb, bc.cfg.VmConfig, nil, ctx)
 			blockExecutionSerialTimer.UpdateSince(pstart)
 			if err == nil {
