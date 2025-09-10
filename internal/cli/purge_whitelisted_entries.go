@@ -11,8 +11,6 @@ import (
 
 type PurgeWhitelistedEntriesCommand struct {
 	*Meta
-
-	output string
 }
 
 func (c *PurgeWhitelistedEntriesCommand) MarkDown() string {
