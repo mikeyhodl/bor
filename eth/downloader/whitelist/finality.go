@@ -67,18 +67,12 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 		return false, nil
 	}
 
-	f.RLock()
-	doExist := f.doExist
-	number := f.Number
-	hash := f.Hash
-	f.RUnlock()
-
 	// Ignore validating against incorrect milestone
-	if isIncorrectMilestone(number, hash) {
+	if isIncorrectMilestone(f.Number, f.Hash) {
 		return true, nil
 	}
 
-	return isValidChain(currentHeader, chain, doExist, number, hash)
+	return isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash)
 }
 
 // reportWhitelist logs the block number and hash if a new and unique entry is being inserted
@@ -107,8 +101,8 @@ func (f *finality[T]) Process(block uint64, hash common.Hash) {
 	}
 }
 
-// Get returns the existing whitelisted
-// entries of checkpoint of the form (doExist,block number,block hash.)
+// Get returns the existing whitelisted entries of the form
+// (doExist, block number, block hash).
 func (f *finality[T]) Get() (bool, uint64, common.Hash) {
 	f.RLock()
 	defer f.RUnlock()
@@ -119,14 +113,14 @@ func (f *finality[T]) Get() (bool, uint64, common.Hash) {
 
 	block, hash, err := rawdb.ReadFinality[T](f.db)
 	if err != nil {
-		fmt.Println("Error while reading whitelisted state from Db", "err", err)
+		log.Debug("Unable to find whitelist entry from db", "err", err)
 		return false, f.Number, f.Hash
 	}
 
 	return true, block, hash
 }
 
-// Purge purges the whitlisted checkpoint
+// Purge removes the whitelisted checkpoint
 func (f *finality[T]) Purge() {
 	f.Lock()
 	defer f.Unlock()
