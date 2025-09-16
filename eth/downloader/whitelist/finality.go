@@ -29,18 +29,6 @@ type finalityService interface {
 	Purge()
 }
 
-func isIncorrectMilestone(number uint64, hash common.Hash) bool {
-	var (
-		incorrectEnd  = uint64(76273070)
-		incorrectHash = common.HexToHash("7910a20918558674edb87759a2bb08b31af0de0e4eef0d8909be75af3591748f")
-	)
-	if number == incorrectEnd && hash == incorrectHash {
-		log.Debug("Ignoring validating against incorrect milestone", "number", incorrectEnd, "hash", incorrectHash)
-		return true
-	}
-	return false
-}
-
 // IsValidPeer checks if the chain we're about to receive from a peer is valid or not
 // in terms of reorgs. We won't reorg beyond the last bor finality submitted to mainchain.
 func (f *finality[T]) IsValidPeer(fetchHeadersByNumber func(number uint64, amount int, skip int, reverse bool) ([]*types.Header, []common.Hash, error)) (bool, error) {
@@ -51,11 +39,6 @@ func (f *finality[T]) IsValidPeer(fetchHeadersByNumber func(number uint64, amoun
 	hash := f.Hash
 	f.RUnlock()
 
-	// Ignore validating against incorrect milestone
-	if isIncorrectMilestone(number, hash) {
-		return true, nil
-	}
-
 	return isValidPeer(fetchHeadersByNumber, doExist, number, hash)
 }
 
@@ -65,11 +48,6 @@ func (f *finality[T]) IsValidChain(currentHeader *types.Header, chain []*types.H
 	// Return if we've received empty chain
 	if len(chain) == 0 {
 		return false, nil
-	}
-
-	// Ignore validating against incorrect milestone
-	if isIncorrectMilestone(f.Number, f.Hash) {
-		return true, nil
 	}
 
 	return isValidChain(currentHeader, chain, f.doExist, f.Number, f.Hash)
