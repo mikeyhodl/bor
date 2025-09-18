@@ -122,6 +122,18 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Value:   &c.cliConfig.BorLogs,
 		Default: c.cliConfig.BorLogs,
 	})
+	f.BoolFlag(&flagset.BoolFlag{
+		Name:    "disable-blind-fork-validation",
+		Usage:   `Disable additional fork validation and accept blind forks without tracing back to last whitelisted entry`,
+		Value:   &c.cliConfig.DisableBlindForkValidation,
+		Default: c.cliConfig.DisableBlindForkValidation,
+	})
+	f.Uint64Flag(&flagset.Uint64Flag{
+		Name:    "max-blind-fork-validation-limit",
+		Usage:   `Maximum number of blocks to traverse back in the database when validating blind forks`,
+		Value:   &c.cliConfig.MaxBlindForkValidationLimit,
+		Default: c.cliConfig.MaxBlindForkValidationLimit,
+	})
 
 	// logging related flags (log-level and verbosity is present above, it will be removed soon)
 	f.StringFlag(&flagset.StringFlag{
@@ -1030,6 +1042,12 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Usage:   "Produce witnesses while syncing",
 		Value:   &c.cliConfig.Witness.ProduceWitnesses,
 		Default: c.cliConfig.Witness.ProduceWitnesses,
+	})
+	f.BoolFlag(&flagset.BoolFlag{
+		Name:    "witness.witnessapi",
+		Usage:   "Enable witness API endpoints (by default disabled)",
+		Value:   &c.cliConfig.Witness.WitnessAPI,
+		Default: c.cliConfig.Witness.WitnessAPI,
 	})
 	f.Uint64Flag(&flagset.Uint64Flag{
 		Name:    "witness.fastforwardthreshold",

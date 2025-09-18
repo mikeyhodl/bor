@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/fdlimit"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
+	"github.com/ethereum/go-ethereum/eth/downloader/whitelist"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/internal/cli/server/chains"
@@ -96,6 +97,12 @@ type Config struct {
 
 	// Ethstats is the address of the ethstats server to send telemetry
 	Ethstats string `hcl:"ethstats,optional" toml:"ethstats,optional"`
+
+	// DisableBlindForkValidation disables additional fork validation and accept blind forks without tracing back to last whitelisted entry
+	DisableBlindForkValidation bool `hcl:"disable-blind-fork-validation,optional" toml:"disable-blind-fork-validation,optional"`
+
+	// MaxBlindForkValidationLimit denotes the maximum number of blocks to traverse back in the database when validating blind forks
+	MaxBlindForkValidationLimit uint64 `hcl:"max-blind-fork-validation-limit,optional" toml:"max-blind-fork-validation-limit,optional"`
 
 	// Logging has the logging related settings
 	Logging *LoggingConfig `hcl:"log,block" toml:"log,block"`
@@ -642,6 +649,9 @@ type WitnessConfig struct {
 	// ProduceWitnesses enables producing witnesses while syncing
 	ProduceWitnesses bool `hcl:"producewitnesses,optional" toml:"producewitnesses,optional"`
 
+	// WitnessAPI enables witness API endpoints
+	WitnessAPI bool `hcl:"witnessapi,optional" toml:"witnessapi,optional"`
+
 	// Minimum necessary distance between local header and peer to fast forward
 	FastForwardThreshold uint64 `hcl:"fastforwardthreshold,optional" toml:"fastforwardthreshold,optional"`
 
@@ -654,16 +664,18 @@ type WitnessConfig struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		Chain:                   "mainnet",
-		Identity:                Hostname(),
-		RequiredBlocks:          map[string]string{},
-		Verbosity:               3,
-		LogLevel:                "",
-		EnablePreimageRecording: false,
-		DataDir:                 DefaultDataDir(),
-		Ancient:                 "",
-		DBEngine:                "pebble",
-		KeyStoreDir:             "",
+		Chain:                       "mainnet",
+		Identity:                    Hostname(),
+		RequiredBlocks:              map[string]string{},
+		Verbosity:                   3,
+		LogLevel:                    "",
+		EnablePreimageRecording:     false,
+		DataDir:                     DefaultDataDir(),
+		Ancient:                     "",
+		DBEngine:                    "pebble",
+		KeyStoreDir:                 "",
+		DisableBlindForkValidation:  false,
+		MaxBlindForkValidationLimit: whitelist.DefaultMaxForkCorrectnessLimit,
 		Logging: &LoggingConfig{
 			Vmodule:             "",
 			Json:                false,
@@ -857,6 +869,7 @@ func DefaultConfig() *Config {
 			Enable:               false,
 			SyncWithWitnesses:    false,
 			ProduceWitnesses:     false,
+			WitnessAPI:           false,
 			FastForwardThreshold: 6400,
 			PruneThreshold:       64000,
 			PruneInterval:        120 * time.Second,
@@ -1294,6 +1307,7 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 	}
 	n.SyncWithWitnesses = c.Witness.SyncWithWitnesses
 	n.SyncAndProduceWitnesses = c.Witness.ProduceWitnesses
+	n.WitnessAPIEnabled = c.Witness.WitnessAPI
 	n.FastForwardThreshold = c.Witness.FastForwardThreshold
 	n.WitnessPruneThreshold = c.Witness.PruneThreshold
 	n.WitnessPruneInterval = c.Witness.PruneInterval
@@ -1305,6 +1319,10 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 	}
 
 	n.EnableBlockTracking = c.Logging.EnableBlockTracking
+
+	// Blind fork acceptance configs
+	n.DisableBlindForkValidation = c.DisableBlindForkValidation
+	n.MaxBlindForkValidationLimit = c.MaxBlindForkValidationLimit
 
 	return &n, nil
 }
