@@ -661,6 +661,10 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 	if err != nil {
 		return nil, nil, 0, nil, 0, err
 	}
+	parallelStatedb, err := state.NewWithReader(parentRoot, bc.statedb, process)
+	if err != nil {
+		return nil, nil, 0, nil, 0, err
+	}
 
 	// Upload the statistics of reader at the end
 	defer func() {
@@ -717,18 +721,18 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 		go func() {
 			pstart := time.Now()
-			statedb.StartPrefetcher("chain", witness)
-			res, err := bc.parallelProcessor.Process(block, statedb, bc.cfg.VmConfig, nil, ctx)
+			parallelStatedb.StartPrefetcher("chain", witness)
+			res, err := bc.parallelProcessor.Process(block, parallelStatedb, bc.cfg.VmConfig, nil, ctx)
 			blockExecutionParallelTimer.UpdateSince(pstart)
 			if err == nil {
 				vstart := time.Now()
-				err = bc.validator.ValidateState(block, statedb, res, false)
+				err = bc.validator.ValidateState(block, parallelStatedb, res, false)
 				vtime = time.Since(vstart)
 			}
 			if res == nil {
 				res = &ProcessResult{}
 			}
-			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, statedb, blockExecutionParallelCounter, true}
+			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, parallelStatedb, blockExecutionParallelCounter, true}
 		}()
 	}
 
