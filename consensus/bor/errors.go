@@ -3,36 +3,10 @@ package bor
 import (
 	"fmt"
 	"time"
+
+	"github.com/ethereum/go-ethereum/consensus/bor/clerk"
+	"github.com/ethereum/go-ethereum/consensus/bor/valset"
 )
-
-// TotalVotingPowerExceededError is returned when the maximum allowed total voting power is exceeded
-type TotalVotingPowerExceededError struct {
-	Sum        int64
-	Validators []*Validator
-}
-
-func (e *TotalVotingPowerExceededError) Error() string {
-	return fmt.Sprintf(
-		"Total voting power should be guarded to not exceed %v; got: %v; for validator set: %v",
-		MaxTotalVotingPower,
-		e.Sum,
-		e.Validators,
-	)
-}
-
-type InvalidStartEndBlockError struct {
-	Start         uint64
-	End           uint64
-	CurrentHeader uint64
-}
-
-func (e *InvalidStartEndBlockError) Error() string {
-	return fmt.Sprintf(
-		"Invalid parameters start: %d and end block: %d params",
-		e.Start,
-		e.End,
-	)
-}
 
 type MaxCheckpointLengthExceededError struct {
 	Start uint64
@@ -94,15 +68,17 @@ func (e *UnauthorizedProposerError) Error() string {
 
 // UnauthorizedSignerError is returned if a header is [being] signed by an unauthorized entity.
 type UnauthorizedSignerError struct {
-	Number uint64
-	Signer []byte
+	Number         uint64
+	Signer         []byte
+	AllowedSigners []*valset.Validator
 }
 
 func (e *UnauthorizedSignerError) Error() string {
 	return fmt.Sprintf(
-		"Signer 0x%x is not a part of the producer set at block %d",
+		"Signer 0x%x is not a part of the producer set at block %d. Allowed signers: %v",
 		e.Signer,
 		e.Number,
+		e.AllowedSigners,
 	)
 }
 
@@ -129,12 +105,12 @@ type InvalidStateReceivedError struct {
 	Number      uint64
 	LastStateID uint64
 	To          *time.Time
-	Event       *EventRecordWithTime
+	Event       *clerk.EventRecordWithTime
 }
 
 func (e *InvalidStateReceivedError) Error() string {
 	return fmt.Sprintf(
-		"Received invalid event %s at block %d. Requested events until %s. Last state id was %d",
+		"Received invalid event %v at block %d. Requested events until %s. Last state id was %d",
 		e.Event,
 		e.Number,
 		e.To.Format(time.RFC3339),

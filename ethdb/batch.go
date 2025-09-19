@@ -22,6 +22,8 @@ const IdealBatchSize = 100 * 1024
 
 // Batch is a write-only database that commits changes to its host database
 // when Write is called. A batch cannot be used concurrently.
+//
+//go:generate mockgen -destination=../eth/filters/IBatch.go -package=filters . Batch
 type Batch interface {
 	KeyValueWriter
 
@@ -43,4 +45,34 @@ type Batcher interface {
 	// NewBatch creates a write-only database that buffers changes to its host db
 	// until a final write is called.
 	NewBatch() Batch
+
+	// NewBatchWithSize creates a write-only database batch with pre-allocated buffer.
+	NewBatchWithSize(size int) Batch
+}
+
+// HookedBatch wraps an arbitrary batch where each operation may be hooked into
+// to monitor from black box code.
+type HookedBatch struct {
+	Batch
+
+	OnPut    func(key []byte, value []byte) // Callback if a key is inserted
+	OnDelete func(key []byte)               // Callback if a key is deleted
+}
+
+// Put inserts the given value into the key-value data store.
+func (b HookedBatch) Put(key []byte, value []byte) error {
+	if b.OnPut != nil {
+		b.OnPut(key, value)
+	}
+
+	return b.Batch.Put(key, value)
+}
+
+// Delete removes the key from the key-value data store.
+func (b HookedBatch) Delete(key []byte) error {
+	if b.OnDelete != nil {
+		b.OnDelete(key)
+	}
+
+	return b.Batch.Delete(key)
 }

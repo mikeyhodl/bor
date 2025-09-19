@@ -1,15 +1,39 @@
-# Build Geth in a stock Go builder container
-FROM golang:1.14-alpine as builder
+# ─── BUILDER STAGE ───────────────────────────────────────────────────────────────
+FROM golang:1.24-alpine AS builder
 
-RUN apk add --no-cache make gcc musl-dev linux-headers git
+ARG BOR_DIR=/var/lib/bor/
+ENV BOR_DIR=$BOR_DIR
 
-ADD . /bor
-RUN cd /bor && make bor
+RUN apk add --no-cache build-base git linux-headers
 
-# Pull Bor into a second stage deploy alpine container
+WORKDIR ${BOR_DIR}
+
+COPY go.mod go.sum ./
+
+RUN --mount=type=ssh \
+    --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY . .
+
+RUN --mount=type=ssh \
+    --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    make bor
+
+# ─── RUNTIME STAGE ────────────────────────────────────────────────────────────────
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates
-COPY --from=builder /bor/build/bin/bor /usr/local/bin/
+ARG BOR_DIR=/var/lib/bor/
+ENV BOR_DIR=$BOR_DIR
+
+RUN apk add --no-cache bash ca-certificates && \
+    mkdir -p ${BOR_DIR}
+
+WORKDIR ${BOR_DIR}
+
+COPY --from=builder ${BOR_DIR}/build/bin/bor /usr/bin/
 
 EXPOSE 8545 8546 8547 30303 30303/udp
+
+ENTRYPOINT ["bor"]
