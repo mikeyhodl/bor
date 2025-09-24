@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math/big"
@@ -32,6 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/history"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/txpool/locals"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -40,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -70,6 +73,9 @@ func (b *EthAPIBackend) SetHead(number uint64) {
 func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
 	if number == rpc.PendingBlockNumber {
+		if b.eth.miner == nil {
+			return nil, errors.New("pending block is not available")
+		}
 		block := b.eth.miner.PendingBlock()
 		if block == nil {
 			return nil, errors.New("pending block is not available")
@@ -140,6 +146,9 @@ func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*ty
 func (b *EthAPIBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	// Pending block is only known by the miner
 	if number == rpc.PendingBlockNumber {
+		if b.eth.miner == nil {
+			return nil, errors.New("pending block is not available")
+		}
 		block := b.eth.miner.PendingBlock()
 		if block == nil {
 			return nil, errors.New("pending block is not available")
@@ -238,12 +247,18 @@ func (b *EthAPIBackend) BlockByNumberOrHash(ctx context.Context, blockNrOrHash r
 }
 
 func (b *EthAPIBackend) Pending() (*types.Block, types.Receipts, *state.StateDB) {
+	if b.eth.miner == nil {
+		return nil, nil, nil
+	}
 	return b.eth.miner.Pending()
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*state.StateDB, *types.Header, error) {
 	// Pending state is only known by the miner
 	if number == rpc.PendingBlockNumber {
+		if b.eth.miner == nil {
+			return nil, nil, errors.New("pending state is not available")
+		}
 		block, _, state := b.eth.miner.Pending()
 		if block == nil || state == nil {
 			return nil, nil, errors.New("pending state is not available")
@@ -341,7 +356,14 @@ func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEven
 }
 
 func (b *EthAPIBackend) SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription {
-	return b.eth.miner.SubscribePendingLogs(ch)
+	if b.eth.miner != nil {
+		return b.eth.miner.SubscribePendingLogs(ch)
+	} else {
+		return event.NewSubscription(func(quit <-chan struct{}) error {
+			<-quit
+			return nil
+		})
+	}
 }
 
 func (b *EthAPIBackend) SubscribeChainEvent(ch chan<- core.ChainEvent) event.Subscription {
@@ -551,4 +573,108 @@ func (b *EthAPIBackend) PurgeWhitelistedMilestone() {
 
 func (b *EthAPIBackend) PeerStats() interface{} {
 	return b.eth.handler.GetPeerStats()
+}
+
+func (b *EthAPIBackend) GetWitnesses(ctx context.Context, originBlock uint64, totalBlocks uint64) ([]*stateless.Witness, error) {
+	var response []*stateless.Witness
+
+	for i := 0; i < int(totalBlocks); i++ {
+		blockNumber := int64(originBlock) + int64(i)
+		blockHeader, err := b.HeaderByNumber(ctx, rpc.BlockNumber(blockNumber))
+		if err != nil {
+			return nil, err
+		}
+
+		rlpEncodedWitness := rawdb.ReadWitness(b.eth.blockchain.DB(), blockHeader.Hash())
+
+		witness, err := stateless.GetWitnessFromRlp(rlpEncodedWitness)
+		if err != nil {
+			// Log the error and return what we have so far.
+			log.Error("Failed to decode witness", "blockNumber", blockNumber, "blockHash", blockHeader.Hash(), "error", err)
+			return response, err
+		}
+		if witness != nil {
+			response = append(response, witness)
+		}
+	}
+
+	return response, nil
+}
+
+func (b *EthAPIBackend) StoreWitness(ctx context.Context, blockhash common.Hash, witness *stateless.Witness) error {
+	var witBuf bytes.Buffer
+	if err := witness.EncodeRLP(&witBuf); err != nil {
+		log.Error("Failed to encode witness", "error", err)
+	}
+
+	rawdb.WriteWitness(b.eth.blockchain.DB(), blockhash, witBuf.Bytes())
+
+	return nil
+}
+
+func (b *EthAPIBackend) WitnessByNumber(ctx context.Context, number rpc.BlockNumber) (*stateless.Witness, error) {
+	if !b.eth.config.WitnessAPIEnabled {
+		return nil, errors.New("witness API is disabled - enable with --witness.witnessapi flag")
+	}
+
+	blockHeader, err := b.HeaderByNumber(ctx, number)
+	if err != nil {
+		return nil, err
+	}
+	if blockHeader == nil {
+		return nil, nil
+	}
+
+	rlpEncodedWitness := rawdb.ReadWitness(b.eth.blockchain.DB(), blockHeader.Hash())
+	if len(rlpEncodedWitness) == 0 {
+		return nil, nil
+	}
+
+	witness, err := stateless.GetWitnessFromRlp(rlpEncodedWitness)
+	if err != nil {
+		return nil, err
+	}
+
+	return witness, nil
+}
+
+func (b *EthAPIBackend) WitnessByHash(ctx context.Context, hash common.Hash) (*stateless.Witness, error) {
+	if !b.eth.config.WitnessAPIEnabled {
+		return nil, errors.New("witness API is disabled - enable with --witness.witnessapi flag")
+	}
+
+	blockHeader, err := b.HeaderByHash(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
+	if blockHeader == nil {
+		return nil, nil
+	}
+
+	rlpEncodedWitness := rawdb.ReadWitness(b.eth.blockchain.DB(), hash)
+	if len(rlpEncodedWitness) == 0 {
+		return nil, nil
+	}
+
+	witness, err := stateless.GetWitnessFromRlp(rlpEncodedWitness)
+	if err != nil {
+		return nil, err
+	}
+
+	return witness, nil
+}
+
+func (b *EthAPIBackend) WitnessByNumberOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (*stateless.Witness, error) {
+	if !b.eth.config.WitnessAPIEnabled {
+		return nil, errors.New("witness API is disabled - enable with --witness.witnessapi flag")
+	}
+
+	if blockNumber, ok := blockNrOrHash.Number(); ok {
+		return b.WitnessByNumber(ctx, blockNumber)
+	}
+	if blockHash, ok := blockNrOrHash.Hash(); ok {
+		return b.WitnessByHash(ctx, blockHash)
+	}
+
+	return nil, errors.New("invalid block number or hash")
 }

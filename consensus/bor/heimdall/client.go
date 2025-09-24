@@ -15,6 +15,7 @@ import (
 
 	"github.com/0xPolygon/heimdall-v2/x/bor/types"
 	clerkTypes "github.com/0xPolygon/heimdall-v2/x/clerk/types"
+	ctypes "github.com/cometbft/cometbft/rpc/core/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	cryptocodec "github.com/cosmos/cosmos-sdk/crypto/codec"
@@ -77,6 +78,8 @@ const (
 
 	fetchSpanFormat = "bor/spans/%d"
 	fetchLatestSpan = "bor/spans/latest"
+
+	fetchStatus = "/status"
 )
 
 // StateSyncEvents fetches the state sync events from heimdall
@@ -156,7 +159,7 @@ func (h *HeimdallClient) GetLatestSpan(ctx context.Context) (*types.Span, error)
 
 	ctx = WithRequestType(ctx, SpanRequest)
 
-	response, err := FetchWithRetry[types.QueryLatestSpanResponse](ctx, h.client, url, h.closeCh)
+	response, err := FetchOnce[types.QueryLatestSpanResponse](ctx, h.client, url, h.closeCh)
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +232,27 @@ func (h *HeimdallClient) FetchMilestoneCount(ctx context.Context) (int64, error)
 		return 0, err
 	}
 	return response.Count, nil
+}
+
+func (h *HeimdallClient) FetchStatus(ctx context.Context) (*ctypes.SyncInfo, error) {
+	ctx = WithRequestType(ctx, StatusRequest)
+
+	url, err := statusURL(h.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := FetchOnce[ctypes.SyncInfo](ctx, h.client, url, h.closeCh)
+	if err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+func FetchOnce[T any](ctx context.Context, client http.Client, url *url.URL, closeCh chan struct{}) (*T, error) {
+	request := &Request{client: client, url: url, start: time.Now()}
+	return Fetch[T](ctx, request)
 }
 
 // FetchWithRetry returns data from heimdall with retry
@@ -364,7 +388,6 @@ func latestSpanUrl(urlString string) (*url.URL, error) {
 func stateSyncURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
 	t := time.Unix(to, 0).UTC()
 	formattedTime := t.Format(time.RFC3339Nano)
-
 	queryParams := fmt.Sprintf(fetchStateSyncEventsFormat, fromID, formattedTime, stateFetchLimit)
 
 	return makeURL(urlString, fetchStateSyncEventsPath, queryParams)
@@ -393,6 +416,10 @@ func checkpointCountURL(urlString string) (*url.URL, error) {
 
 func milestoneCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchMilestoneCount, "")
+}
+
+func statusURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchStatus, "")
 }
 
 func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {

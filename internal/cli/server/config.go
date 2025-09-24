@@ -145,6 +145,9 @@ type Config struct {
 	// ParallelEVM has the parallel evm related settings
 	ParallelEVM *ParallelEVMConfig `hcl:"parallelevm,block" toml:"parallelevm,block"`
 
+	// Witness has the witness related settings
+	Witness *WitnessConfig `hcl:"witness,block" toml:"witness,block"`
+
 	// Develop Fake Author mode to produce blocks without authorisation
 	DevFakeAuthor bool `hcl:"devfakeauthor,optional" toml:"devfakeauthor,optional"`
 
@@ -636,6 +639,29 @@ type ParallelEVMConfig struct {
 	Enforce bool `hcl:"enforce,optional" toml:"enforce,optional"`
 }
 
+type WitnessConfig struct {
+	// Enable enables the wit/1 protocol
+	Enable bool `hcl:"enable,optional" toml:"enable,optional"`
+
+	// SyncWithWitnesses enables syncing blocks with witnesses
+	SyncWithWitnesses bool `hcl:"syncwithwitnesses,optional" toml:"syncwithwitnesses,optional"`
+
+	// ProduceWitnesses enables producing witnesses while syncing
+	ProduceWitnesses bool `hcl:"producewitnesses,optional" toml:"producewitnesses,optional"`
+
+	// WitnessAPI enables witness API endpoints
+	WitnessAPI bool `hcl:"witnessapi,optional" toml:"witnessapi,optional"`
+
+	// Minimum necessary distance between local header and peer to fast forward
+	FastForwardThreshold uint64 `hcl:"fastforwardthreshold,optional" toml:"fastforwardthreshold,optional"`
+
+	// Minimum necessary distance between local header and latest non pruned witness
+	PruneThreshold uint64 `hcl:"prunethreshold,optional" toml:"prunethreshold,optional"`
+
+	// The time interval between each witness prune routine
+	PruneInterval time.Duration `hcl:"pruneinterval,optional" toml:"pruneinterval,optional"`
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		Chain:                       "mainnet",
@@ -692,6 +718,7 @@ func DefaultConfig() *Config {
 		StateScheme: "path",
 		Snapshot:    true,
 		BorLogs:     false,
+
 		TxPool: &TxPoolConfig{
 			Locals:       []string{},
 			NoLocals:     false,
@@ -837,6 +864,15 @@ func DefaultConfig() *Config {
 			Enable:               true,
 			SpeculativeProcesses: 8,
 			Enforce:              false,
+		},
+		Witness: &WitnessConfig{
+			Enable:               false,
+			SyncWithWitnesses:    false,
+			ProduceWitnesses:     false,
+			WitnessAPI:           false,
+			FastForwardThreshold: 6400,
+			PruneThreshold:       64000,
+			PruneInterval:        120 * time.Second,
 		},
 		History: &HistoryConfig{
 			TransactionHistory: ethconfig.Defaults.TransactionHistory,
@@ -1204,13 +1240,16 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 
 	n.RPCTxFeeCap = c.JsonRPC.TxFeeCap
 
-	// Choose the sync mode. Only "full" sync is supported
+	// Choose the sync mode. Only "full" or "stateless" sync is supported
 	switch c.SyncMode {
 	case "full":
 		n.SyncMode = downloader.FullSync
 	case "snap":
 		log.Info("Snap sync is momentarily disabled in bor, switching to full sync")
 		n.SyncMode = downloader.FullSync
+	case "stateless":
+		n.SyncMode = downloader.StatelessSync
+		log.Info("Using Stateless Sync mode - syncing from latest checkpoint without history")
 	default:
 		return nil, fmt.Errorf("sync mode '%s' not found", c.SyncMode)
 	}
@@ -1258,6 +1297,21 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 	n.ParallelEVM.Enable = c.ParallelEVM.Enable
 	n.ParallelEVM.SpeculativeProcesses = c.ParallelEVM.SpeculativeProcesses
 	n.ParallelEVM.Enforce = c.ParallelEVM.Enforce
+
+	n.WitnessProtocol = c.Witness.Enable
+	if c.SyncMode == "stateless" {
+		if !c.Witness.Enable {
+			log.Warn("Witness protocol is disabled, overriding to true for stateless sync")
+		}
+		n.WitnessProtocol = true
+	}
+	n.SyncWithWitnesses = c.Witness.SyncWithWitnesses
+	n.SyncAndProduceWitnesses = c.Witness.ProduceWitnesses
+	n.WitnessAPIEnabled = c.Witness.WitnessAPI
+	n.FastForwardThreshold = c.Witness.FastForwardThreshold
+	n.WitnessPruneThreshold = c.Witness.PruneThreshold
+	n.WitnessPruneInterval = c.Witness.PruneInterval
+
 	n.RPCReturnDataLimit = c.RPCReturnDataLimit
 
 	if c.Ancient != "" {
@@ -1326,7 +1380,7 @@ func ambiguousAddrRecovery(ks *keystore.KeyStore, err *keystore.AmbiguousAddrErr
 
 	for _, a := range err.Matches {
 		if err := ks.Unlock(a, auth); err == nil {
-			// nolint: gosec, exportloopref
+			// nolint:gosec, exportloopref
 			match = &a
 			break
 		}

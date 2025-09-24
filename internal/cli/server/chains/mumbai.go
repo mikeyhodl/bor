@@ -29,10 +29,14 @@ var mumbaiTestnet = &Chain{
 			LondonBlock:         big.NewInt(22640000),
 			ShanghaiBlock:       big.NewInt(41874000),
 			CancunBlock:         big.NewInt(45648608),
+			PragueBlock:         big.NewInt(48467456),
 			Bor: &params.BorConfig{
-				JaipurBlock: big.NewInt(22770000),
-				DelhiBlock:  big.NewInt(29638656),
-				IndoreBlock: big.NewInt(37075456),
+				JaipurBlock:    big.NewInt(22770000),
+				DelhiBlock:     big.NewInt(29638656),
+				IndoreBlock:    big.NewInt(37075456),
+				AhmedabadBlock: big.NewInt(48467456),
+				BhilaiBlock:    big.NewInt(48467456),
+				RioBlock:       big.NewInt(48473856),
 				StateSyncConfirmationDelay: map[string]uint64{
 					"37075456": 128,
 				},
@@ -59,6 +63,10 @@ var mumbaiTestnet = &Chain{
 				BurntContract: map[string]string{
 					"22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
 					"41874000": "0x617b94CCCC2511808A3C9478ebb96f455CF167aA",
+				},
+				Coinbase: map[string]string{
+					"0":        "0x0000000000000000000000000000000000000000",
+					"49439808": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0",
 				},
 				BlockAlloc: map[string]interface{}{
 					// write as interface since that is how it is decoded in genesis

@@ -15,10 +15,14 @@
     "londonBlock": 22640000,
     "shanghaiBlock": 41874000,
     "cancunBlock": 45648608,
+    "pragueBlock": 48467456,
     "bor": {
       "jaipurBlock": 22770000,
       "delhiBlock": 29638656,
       "indoreBlock": 37075456,
+      "ahmedabadBlock": 48467456,
+      "bhilaiBlock": 48467456,
+      "rioBlock": 48473856,
       "stateSyncConfirmationDelay": {
         "37075456": 128
       },
@@ -45,6 +49,10 @@
       "burntContract": {
         "22640000": "0x70bcA57F4579f58670aB2d18Ef16e02C17553C38",
         "41874000": "0x617b94CCCC2511808A3C9478ebb96f455CF167aA"
+      },
+      "coinbase": {
+          "0":        "0x0000000000000000000000000000000000000000",
+          "49439808": "0x7Ee41D8A25641000661B1EF5E6AE8A00400466B0"
       },
       "blockAlloc": {
         "22244000": {

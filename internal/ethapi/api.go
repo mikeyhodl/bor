@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -778,6 +779,21 @@ func (api *BlockChainAPI) GetTdByHash(ctx context.Context, hash common.Hash) map
 	return resp
 }
 
+// OverrideAccount indicates the overriding fields of account during the execution
+// of a message call.
+// Note, state and stateDiff can't be specified at the same time. If state is
+// set, message execution will only use the data in the given state. Otherwise
+// if stateDiff is set, all diff will be applied first and then execute the call
+// message.
+type OverrideAccount struct {
+	Nonce            *hexutil.Uint64             `json:"nonce"`
+	Code             *hexutil.Bytes              `json:"code"`
+	Balance          *hexutil.Big                `json:"balance"`
+	State            map[common.Hash]common.Hash `json:"state"`
+	StateDiff        map[common.Hash]common.Hash `json:"stateDiff"`
+	MovePrecompileTo *common.Address             `json:"movePrecompileToAddress"`
+}
+
 // GetTdByNumber returns a map containing the total difficulty (hex-encoded) for the given block number.
 func (api *BlockChainAPI) GetTdByNumber(ctx context.Context, blockNr rpc.BlockNumber) map[string]interface{} {
 	td := api.b.GetTdByNumber(ctx, blockNr)
@@ -1219,6 +1235,55 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, config *param
 	return fields
 }
 
+// RPCMarshalWitness converts the given witness to the RPC output.
+func RPCMarshalWitness(witness *stateless.Witness) map[string]interface{} {
+	if witness == nil {
+		return nil
+	}
+
+	result := map[string]interface{}{
+		"context": RPCMarshalHeader(witness.Header()),
+	}
+
+	// Marshal headers array.
+	if len(witness.Headers) > 0 {
+		headers := make([]map[string]interface{}, len(witness.Headers))
+		for i, header := range witness.Headers {
+			headers[i] = RPCMarshalHeader(header)
+		}
+		result["headers"] = headers
+	}
+
+	// Marshal codes as hex strings (since they're bytecode).
+	if len(witness.Codes) > 0 {
+		codes := make([]hexutil.Bytes, 0, len(witness.Codes))
+		for code := range witness.Codes {
+			codes = append(codes, hexutil.Bytes(code))
+		}
+		result["codes"] = codes
+	}
+
+	// Marshal state nodes as hex strings (since they're trie nodes).
+	if len(witness.State) > 0 {
+		state := make([]hexutil.Bytes, 0, len(witness.State))
+		for node := range witness.State {
+			state = append(state, hexutil.Bytes(node))
+		}
+		result["state"] = state
+	}
+
+	// Add metadata.
+	result["codesCount"] = len(witness.Codes)
+	result["stateNodesCount"] = len(witness.State)
+
+	// Add pre-state root if available.
+	if len(witness.Headers) > 0 {
+		result["preStateRoot"] = witness.Root()
+	}
+
+	return result
+}
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
 	BlockHash           *common.Hash                 `json:"blockHash"`
@@ -1532,6 +1597,9 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		// Set the accesslist to the last al
 		args.AccessList = &accessList
 		msg := args.ToMessage(header.BaseFee, true, true)
+		msg.GasPrice = big.NewInt(0)
+		msg.GasFeeCap = big.NewInt(0)
+		msg.GasTipCap = big.NewInt(0)
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, addressesToExclude)
