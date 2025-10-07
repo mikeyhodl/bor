@@ -236,6 +236,28 @@ func (buf *receiptListBuffers) encodeForStorage(rs []Receipt) rlp.RawValue {
 	return out.Bytes()
 }
 
+// excludeStateSyncReceipt excludes the state sync receipt from the list if present
+// and returns the modified list.
+func excludeStateSyncReceipt(items []Receipt) []Receipt {
+	if len(items) == 0 {
+		return items
+	}
+
+	// The state-sync receipt can either have a 0 cumulative gas used (this depends on the remote peer) or
+	// have the same cumulative gas used as the previous receipt as state-sync transactions uses 0 gas and
+	// hence they don't contribute to the cumulative gas used value.
+	if items[len(items)-1].GasUsed == 0 {
+		return items[:len(items)-1]
+	}
+
+	// If not found, compare with a receipt before
+	if len(items) >= 2 && items[len(items)-1].GasUsed == items[len(items)-2].GasUsed {
+		return items[:len(items)-1]
+	}
+
+	return items
+}
+
 // ReceiptList68 is a block receipt list as downloaded by eth/68.
 // This also implements types.DerivableList for validation purposes.
 type ReceiptList68 struct {
@@ -337,6 +359,11 @@ func (rl *ReceiptList68) EncodeRLP(_w io.Writer) error {
 	return w.Flush()
 }
 
+// ExcludeStateSync removes the state sync transaction receipt from the list.
+func (rl *ReceiptList68) ExcludeStateSyncReceipt() {
+	rl.items = excludeStateSyncReceipt(rl.items)
+}
+
 // ReceiptList69 is the block receipt list as downloaded by eth/69.
 // This implements types.DerivableList for validation purposes.
 type ReceiptList69 struct {
@@ -403,10 +430,16 @@ func (rl *ReceiptList69) EncodeRLP(_w io.Writer) error {
 	return w.Flush()
 }
 
+// ExcludeStateSync removes the state sync transaction receipt from the list.
+func (rl *ReceiptList69) ExcludeStateSyncReceipt() {
+	rl.items = excludeStateSyncReceipt(rl.items)
+}
+
 // blockReceiptsToNetwork69 takes a slice of rlp-encoded receipts, and transactions,
 // and applies the type-encoding on the receipts (for non-legacy receipts).
-// e.g. for non-legacy receipts: receipt-data -> {tx-type || receipt-data}
-func blockReceiptsToNetwork69(blockReceipts, blockBody rlp.RawValue) ([]byte, error) {
+// e.g. for non-legacy receipts: receipt-data -> {tx-type || receipt-data}. It also
+// handles state-sync transaction receipts and encodes them in the same format.
+func blockReceiptsToNetwork69(blockReceipts, blockBody rlp.RawValue, isStateSyncReceipt func(index int) bool) ([]byte, error) {
 	txTypesIter, err := txTypesInBody(blockBody)
 	if err != nil {
 		return nil, fmt.Errorf("invalid block body: %v", err)
@@ -421,10 +454,14 @@ func blockReceiptsToNetwork69(blockReceipts, blockBody rlp.RawValue) ([]byte, er
 	)
 	outer := enc.List()
 	for i := 0; it.Next(); i++ {
-		txType, _ := nextTxType()
 		content, _, _ := rlp.SplitList(it.Value())
 		receiptList := enc.List()
-		enc.WriteUint64(uint64(txType))
+		if isStateSyncReceipt(i) {
+			enc.WriteUint64(uint64(0)) // TxType is always 0 for state-sync transactions
+		} else {
+			txType, _ := nextTxType()
+			enc.WriteUint64(uint64(txType))
+		}
 		enc.Write(content)
 		enc.ListEnd(receiptList)
 	}
