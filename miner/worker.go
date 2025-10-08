@@ -1555,12 +1555,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, noempty bool, timestamp int
 
 	// Create an empty block based on temporary copied state for
 	// sealing in advance without waiting block execution finished.
-	// If the block is a veblop block, we will never try to create a commit for an empty block.
-	var isRio bool
-	if w.chainConfig.Bor != nil {
-		isRio = w.chainConfig.Bor.IsRio(work.header.Number)
-	}
-	if !noempty && !w.noempty.Load() && !isRio {
+	if !noempty && !w.noempty.Load() {
 		_ = w.commit(work.copy(), nil, false, start)
 	}
 	// Fill pending transactions from the txpool into the block.
