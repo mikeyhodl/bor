@@ -389,6 +389,10 @@ type SealerConfig struct {
 	RecommitRaw string        `hcl:"recommit,optional" toml:"recommit,optional"`
 
 	CommitInterruptFlag bool `hcl:"commitinterrupt,optional" toml:"commitinterrupt,optional"`
+
+	// BlockTime is the block time defined by the miner. Needs to be larger or equal to the consensus block time. If not set (default = 0), the miner will use the consensus block time.
+	BlockTime    time.Duration `hcl:"-,optional" toml:"-"`
+	BlockTimeRaw string        `hcl:"blocktime,optional" toml:"blocktime,optional"`
 }
 
 type JsonRPCConfig struct {
@@ -686,12 +690,6 @@ type WitnessConfig struct {
 
 	// Minimum necessary distance between local header and peer to fast forward
 	FastForwardThreshold uint64 `hcl:"fastforwardthreshold,optional" toml:"fastforwardthreshold,optional"`
-
-	// Minimum necessary distance between local header and latest non pruned witness
-	PruneThreshold uint64 `hcl:"prunethreshold,optional" toml:"prunethreshold,optional"`
-
-	// The time interval between each witness prune routine
-	PruneInterval time.Duration `hcl:"pruneinterval,optional" toml:"pruneinterval,optional"`
 }
 
 func DefaultConfig() *Config {
@@ -772,6 +770,7 @@ func DefaultConfig() *Config {
 			ExtraData:           "",
 			Recommit:            125 * time.Second,
 			CommitInterruptFlag: true,
+			BlockTime:           0,
 		},
 		Gpo: &GpoConfig{
 			Blocks:           20,
@@ -906,8 +905,6 @@ func DefaultConfig() *Config {
 			ProduceWitnesses:     false,
 			WitnessAPI:           false,
 			FastForwardThreshold: 6400,
-			PruneThreshold:       64000,
-			PruneInterval:        120 * time.Second,
 		},
 		History: &HistoryConfig{
 			TransactionHistory: ethconfig.Defaults.TransactionHistory,
@@ -967,6 +964,7 @@ func (c *Config) fillTimeDurations() error {
 	}{
 		{"jsonrpc.evmtimeout", &c.JsonRPC.RPCEVMTimeout, &c.JsonRPC.RPCEVMTimeoutRaw},
 		{"miner.recommit", &c.Sealer.Recommit, &c.Sealer.RecommitRaw},
+		{"miner.blocktime", &c.Sealer.BlockTime, &c.Sealer.BlockTimeRaw},
 		{"jsonrpc.timeouts.read", &c.JsonRPC.HttpTimeout.ReadTimeout, &c.JsonRPC.HttpTimeout.ReadTimeoutRaw},
 		{"jsonrpc.timeouts.write", &c.JsonRPC.HttpTimeout.WriteTimeout, &c.JsonRPC.HttpTimeout.WriteTimeoutRaw},
 		{"jsonrpc.timeouts.idle", &c.JsonRPC.HttpTimeout.IdleTimeout, &c.JsonRPC.HttpTimeout.IdleTimeoutRaw},
@@ -1107,6 +1105,7 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 		n.Miner.GasCeil = c.Sealer.GasCeil
 		n.Miner.ExtraData = []byte(c.Sealer.ExtraData)
 		n.Miner.CommitInterruptFlag = c.Sealer.CommitInterruptFlag
+		n.Miner.BlockTime = c.Sealer.BlockTime
 
 		if etherbase := c.Sealer.Etherbase; etherbase != "" {
 			if !common.IsHexAddress(etherbase) {
@@ -1377,8 +1376,6 @@ func (c *Config) buildEth(stack *node.Node, accountManager *accounts.Manager) (*
 	n.SyncAndProduceWitnesses = c.Witness.ProduceWitnesses
 	n.WitnessAPIEnabled = c.Witness.WitnessAPI
 	n.FastForwardThreshold = c.Witness.FastForwardThreshold
-	n.WitnessPruneThreshold = c.Witness.PruneThreshold
-	n.WitnessPruneInterval = c.Witness.PruneInterval
 
 	n.RPCReturnDataLimit = c.RPCReturnDataLimit
 

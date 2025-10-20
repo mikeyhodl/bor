@@ -364,6 +364,13 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Default: c.cliConfig.Sealer.CommitInterruptFlag,
 		Group:   "Sealer",
 	})
+	f.DurationFlag(&flagset.DurationFlag{
+		Name:    "miner.blocktime",
+		Usage:   "The block time defined by the miner. Needs to be larger or equal to the consensus block time. If not set (default = 0), the miner will use the consensus block time.",
+		Value:   &c.cliConfig.Sealer.BlockTime,
+		Default: c.cliConfig.Sealer.BlockTime,
+		Group:   "Sealer",
+	})
 
 	// ethstats
 	f.StringFlag(&flagset.StringFlag{
@@ -1082,18 +1089,6 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Usage:   "Minimum necessary distance between local header and chain tip to trigger fast forward",
 		Value:   &c.cliConfig.Witness.FastForwardThreshold,
 		Default: c.cliConfig.Witness.FastForwardThreshold,
-	})
-	f.Uint64Flag(&flagset.Uint64Flag{
-		Name:    "witness.prunethreshold",
-		Usage:   "Maximum distance between local header and latest non pruned witness after a pruning routine",
-		Value:   &c.cliConfig.Witness.PruneThreshold,
-		Default: c.cliConfig.Witness.PruneThreshold,
-	})
-	f.DurationFlag(&flagset.DurationFlag{
-		Name:    "witness.pruneinterval",
-		Usage:   "The time interval between each witness prune routine",
-		Value:   &c.cliConfig.Witness.PruneInterval,
-		Default: c.cliConfig.Witness.PruneInterval,
 	})
 
 	f.Uint64Flag(&flagset.Uint64Flag{
