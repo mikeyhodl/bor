@@ -1747,6 +1747,12 @@ func splitReceiptsAndDeriveFields(receipts rlp.RawValue, number uint64, hash com
 		return nil, nil
 	}
 
+	// After the Madhugiri HF, no need to split receipts as all receipts for a block
+	// are stored together (i.e. under same key).
+	if borCfg.IsMadhugiri(big.NewInt(int64(number))) {
+		return receipts, nil
+	}
+
 	// Bor receipts can only exist on sprint end blocks. Avoid decoding if possible.
 	if !types.IsSprintEndBlock(borCfg, number) {
 		return receipts, nil
@@ -2190,11 +2196,11 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	var stateSyncLogs []*types.Log
 
 	if len(blockLogs) > 0 {
-		sort.SliceStable(blockLogs, func(i, j int) bool {
-			return blockLogs[i].Index < blockLogs[j].Index
-		})
-
-		if len(blockLogs) > len(logs) {
+		// After Madhugiri HF we don't write bor receipts separately
+		if !(bc.chainConfig.Bor != nil && bc.chainConfig.Bor.IsMadhugiri(block.Number())) && len(blockLogs) > len(logs) {
+			sort.SliceStable(blockLogs, func(i, j int) bool {
+				return blockLogs[i].Index < blockLogs[j].Index
+			})
 			stateSyncLogs = blockLogs[len(logs):] // get state-sync logs from `state.Logs()`
 
 			// State sync logs don't have tx index, tx hash and other necessary fields
@@ -2376,7 +2382,7 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 			bc.chainHeadFeed.Send(ChainHeadEvent{Header: block.Header()})
 			// BOR state sync feed related changes
 			bc.stateSyncMu.RLock()
-			for _, data := range bc.stateSyncData {
+			for _, data := range bc.GetStateSync() {
 				bc.stateSyncFeed.Send(StateSyncEvent{Data: data})
 			}
 			bc.stateSyncMu.RUnlock()
@@ -3176,7 +3182,7 @@ func (bc *BlockChain) insertChainWithWitnesses(chain types.Blocks, setHead bool,
 
 		// BOR state sync feed related changes
 		bc.stateSyncMu.RLock()
-		for _, data := range bc.stateSyncData {
+		for _, data := range bc.GetStateSync() {
 			bc.stateSyncFeed.Send(StateSyncEvent{Data: data})
 		}
 		bc.stateSyncMu.RUnlock()
