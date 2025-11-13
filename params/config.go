@@ -420,12 +420,14 @@ var (
 			AhmedabadBlock: big.NewInt(62278656),
 			BhilaiBlock:    big.NewInt(73440256),
 			RioBlock:       big.NewInt(77414656),
+			MadhugiriBlock: big.NewInt(79783223),
 			StateSyncConfirmationDelay: map[string]uint64{
 				"44934656": 128,
 			},
 
 			Period: map[string]uint64{
-				"0": 2,
+				"0":        2,
+				"79783223": 1,
 			},
 			ProducerDelay: map[string]uint64{
 				"0":        6,
