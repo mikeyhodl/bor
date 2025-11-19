@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           check-latest: true
       - uses: actions/checkout@v4
       - uses: technote-space/get-diff-action@v6
