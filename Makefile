@@ -216,7 +216,7 @@ geth-windows-amd64:
 	@ls -ld $(GOBIN)/geth-windows-* | grep amd64
 
 PACKAGE_NAME          := github.com/0xPolygon/bor
-GOLANG_CROSS_VERSION  ?= v1.22.1
+GOLANG_CROSS_VERSION  ?= v1.25.4
 
 .PHONY: release-dry-run
 release-dry-run:

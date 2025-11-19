@@ -6,9 +6,9 @@ jobs:
     name: Run govulncheck
     runs-on: ubuntu24.04-16core-64GB-600SSD-bor
     steps:
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.24.6'
+          go-version-file: 'go.mod'
           check-latest: true
       - uses: actions/checkout@v4
       - uses: technote-space/get-diff-action@v6

@@ -30,9 +30,9 @@ jobs:
           git submodule update --init --recursive --force
           git fetch --no-tags --prune --depth=1 origin +refs/heads/master:refs/remotes/origin/master
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.24.6
+          go-version-file: 'go.mod'
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
@@ -62,9 +62,9 @@ jobs:
           git submodule update --init --recursive --force
           git fetch --no-tags --prune --depth=1 origin +refs/heads/master:refs/remotes/origin/master
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.24.6
+          go-version-file: 'go.mod'
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
@@ -90,9 +90,9 @@ jobs:
           git submodule update --init --recursive --force
           git fetch --no-tags --prune --depth=1 origin +refs/heads/master:refs/remotes/origin/master
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.24.6
+          go-version-file: 'go.mod'
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
@@ -141,9 +141,9 @@ jobs:
           git submodule update --init --recursive --force
           git fetch --no-tags --prune --depth=1 origin +refs/heads/master:refs/remotes/origin/master
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: 1.24.6
+          go-version-file: 'go.mod'
 
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
