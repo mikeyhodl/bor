@@ -92,6 +92,28 @@ type Database struct {
 	levelWriteAmpGauge []*metrics.GaugeFloat64 // Gauge for tracking write amplification per level
 	totalWriteAmpGauge *metrics.GaugeFloat64   // Gauge for tracking total write amplification
 
+	// Detailed I/O tracking metrics
+	walBytesWrittenMeter   *metrics.Meter // Bytes written to WAL
+	walFileCountGauge      *metrics.Gauge // Number of WAL files
+	sstBytesReadMeter      *metrics.Meter // Bytes read from SST files (compaction input)
+	sstBytesWrittenMeter   *metrics.Meter // Bytes written to SST files (compaction output)
+	flushBytesWrittenMeter *metrics.Meter // Bytes written during memtable flush
+
+	// Per-level size tracking
+	levelSizeGauge  []*metrics.Gauge // Size of each level in bytes
+	levelScoreGauge []*metrics.Gauge // Compaction score per level (>1 means needs compaction)
+
+	// Detailed WAL metrics
+	walSizeGauge         *metrics.Gauge // Current WAL size
+	walPhysicalSizeGauge *metrics.Gauge // Physical WAL size on disk
+	walObsoleteSizeGauge *metrics.Gauge // Obsolete WAL data size
+
+	// Snapshot metrics
+	snapshotCountGauge *metrics.Gauge // Number of snapshots
+
+	// Keys metrics for understanding data distribution
+	keysCountGauge []*metrics.Gauge // Number of keys per level
+
 	quitLock sync.RWMutex    // Mutex protecting the quit channel and the closed flag
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
 	closed   bool            // keep track of whether we're Closed
@@ -370,6 +392,21 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 	// Register read and write amplification metrics
 	db.readAmpGauge = metrics.GetOrRegisterGaugeFloat64(namespace+"readamp", nil)
 	db.totalWriteAmpGauge = metrics.GetOrRegisterGaugeFloat64(namespace+"writeamp/total", nil)
+
+	// Register detailed I/O tracking metrics
+	db.walBytesWrittenMeter = metrics.GetOrRegisterMeter(namespace+"wal/bytes", nil)
+	db.walFileCountGauge = metrics.GetOrRegisterGauge(namespace+"wal/files", nil)
+	db.sstBytesReadMeter = metrics.GetOrRegisterMeter(namespace+"sst/read", nil)
+	db.sstBytesWrittenMeter = metrics.GetOrRegisterMeter(namespace+"sst/written", nil)
+	db.flushBytesWrittenMeter = metrics.GetOrRegisterMeter(namespace+"flush/bytes", nil)
+
+	// WAL size metrics
+	db.walSizeGauge = metrics.GetOrRegisterGauge(namespace+"wal/size", nil)
+	db.walPhysicalSizeGauge = metrics.GetOrRegisterGauge(namespace+"wal/physicalsize", nil)
+	db.walObsoleteSizeGauge = metrics.GetOrRegisterGauge(namespace+"wal/obsoletesize", nil)
+
+	// Snapshot metrics
+	db.snapshotCountGauge = metrics.GetOrRegisterGauge(namespace+"snapshots/count", nil)
 
 	// Start up the metrics gathering and return
 	go db.meter(metricsGatheringInterval, namespace)
@@ -653,24 +690,65 @@ func (d *Database) meter(refresh time.Duration, namespace string) {
 		// ReadAmp returns the current read amplification of the database
 		d.readAmpGauge.Update(float64(stats.ReadAmp()))
 
+		// Track detailed I/O metrics
+		var (
+			totalSSTBytesRead    int64
+			totalSSTBytesWritten int64
+			totalFlushBytes      int64
+		)
+
 		// Calculate and update write amplification metrics per level
 		for i, level := range stats.Levels {
 			// Append metrics for additional layers
 			if i >= len(d.levelsGauge) {
 				d.levelsGauge = append(d.levelsGauge, metrics.GetOrRegisterGauge(namespace+fmt.Sprintf("tables/level%v", i), nil))
 				d.levelWriteAmpGauge = append(d.levelWriteAmpGauge, metrics.GetOrRegisterGaugeFloat64(namespace+fmt.Sprintf("writeamp/level%v", i), nil))
+				d.levelSizeGauge = append(d.levelSizeGauge, metrics.GetOrRegisterGauge(namespace+fmt.Sprintf("size/level%v", i), nil))
+				d.levelScoreGauge = append(d.levelScoreGauge, metrics.GetOrRegisterGauge(namespace+fmt.Sprintf("score/level%v", i), nil))
+				d.keysCountGauge = append(d.keysCountGauge, metrics.GetOrRegisterGauge(namespace+fmt.Sprintf("keys/level%v", i), nil))
 			}
 			d.levelsGauge[i].Update(level.NumFiles)
 
-			// Update write amplification for this level (as float)
+			// Update write amplification for this level
 			writeAmp := level.WriteAmp()
 			d.levelWriteAmpGauge[i].Update(writeAmp)
+
+			// Update level size
+			d.levelSizeGauge[i].Update(level.Size)
+
+			// Update compaction score (>1.0 means level needs compaction)
+			d.levelScoreGauge[i].Update(int64(level.Score * 1000)) // Multiply by 1000 for precision
+
+			// Update keys count per level
+			d.keysCountGauge[i].Update(level.NumFiles) // Approximate by file count
+
+			// Accumulate I/O stats
+			totalSSTBytesRead += int64(level.BytesRead)
+			totalSSTBytesWritten += int64(level.BytesCompacted)
+			totalFlushBytes += int64(level.BytesFlushed)
 		}
 
-		// Calculate total write amplification (as float)
+		// Update I/O meters (mark only the delta since last measurement)
+		if i > 1 {
+			d.sstBytesReadMeter.Mark(totalSSTBytesRead - compReads[(i-1)%2])
+			d.sstBytesWrittenMeter.Mark(totalSSTBytesWritten - compWrites[(i-1)%2])
+		}
+		d.flushBytesWrittenMeter.Mark(totalFlushBytes)
+
+		// Calculate total write amplification
 		totalMetrics := stats.Total()
 		totalWriteAmp := totalMetrics.WriteAmp()
 		d.totalWriteAmpGauge.Update(totalWriteAmp)
+
+		// Update WAL metrics
+		d.walBytesWrittenMeter.Mark(int64(stats.WAL.BytesWritten) - nWrites[(i-1)%2])
+		d.walFileCountGauge.Update(stats.WAL.Files)
+		d.walSizeGauge.Update(int64(stats.WAL.Size))
+		d.walPhysicalSizeGauge.Update(int64(stats.WAL.PhysicalSize))
+		d.walObsoleteSizeGauge.Update(int64(stats.WAL.ObsoletePhysicalSize))
+
+		// Update snapshot count
+		d.snapshotCountGauge.Update(int64(stats.Snapshots.Count))
 
 		// Sleep a bit, then repeat the stats collection
 		select {
