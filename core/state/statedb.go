@@ -226,13 +226,11 @@ func (s *StateDB) GetMVHashmap() *blockstm.MVHashMap {
 	return s.mvHashmap
 }
 
-func (s *StateDB) MVWriteList(sender *common.Address) []blockstm.WriteDescriptor {
+func (s *StateDB) MVWriteList() []blockstm.WriteDescriptor {
 	writes := make([]blockstm.WriteDescriptor, 0, len(s.writeMap))
 
 	for _, v := range s.writeMap {
-		_, shouldSkip := s.revertedKeys[v.Path]
-
-		if !shouldSkip || (sender != nil && v.Path.GetAddress() == *sender) {
+		if _, ok := s.revertedKeys[v.Path]; !ok {
 			writes = append(writes, v)
 		}
 	}
