@@ -325,7 +325,6 @@ func (ch selfDestructChange) revert(s *StateDB) {
 	if obj != nil {
 		obj.selfDestructed = false
 		RevertWrite(s, blockstm.NewSubpathKey(ch.account, SuicidePath))
-		RevertWrite(s, blockstm.NewSubpathKey(ch.account, BalancePath))
 	}
 }
 
