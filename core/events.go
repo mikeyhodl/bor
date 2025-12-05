@@ -17,31 +17,30 @@
 package core
 
 import (
-	"github.com/maticnetwork/bor/common"
-	"github.com/maticnetwork/bor/core/types"
+	"github.com/ethereum/go-ethereum/core/stateless"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // NewTxsEvent is posted when a batch of transactions enter the transaction pool.
 type NewTxsEvent struct{ Txs []*types.Transaction }
 
 // NewMinedBlockEvent is posted when a block has been imported.
-type NewMinedBlockEvent struct{ Block *types.Block }
+type NewMinedBlockEvent struct {
+	Block   *types.Block
+	Witness *stateless.Witness
+}
 
 // RemovedLogsEvent is posted when a reorg happens
 type RemovedLogsEvent struct{ Logs []*types.Log }
 
 type ChainEvent struct {
-	Block *types.Block
-	Hash  common.Hash
-	Logs  []*types.Log
-}
-
-type StateSyncEvent struct {
-	StateData *types.StateData
+	Header *types.Header
 }
 
 type ChainSideEvent struct {
-	Block *types.Block
+	Header *types.Header
 }
 
-type ChainHeadEvent struct{ Block *types.Block }
+type ChainHeadEvent struct {
+	Header *types.Header
+}
