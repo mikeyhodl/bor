@@ -19,11 +19,12 @@ package enode
 import (
 	"encoding/binary"
 	"runtime"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/maticnetwork/bor/p2p/enr"
+	"github.com/ethereum/go-ethereum/p2p/enr"
 )
 
 func TestReadNodes(t *testing.T) {
@@ -43,6 +44,7 @@ func TestReadNodesCycle(t *testing.T) {
 	}
 	nodes := ReadNodes(iter, 10)
 	checkNodes(t, nodes, 3)
+
 	if iter.count != 10 {
 		t.Fatalf("%d calls to Next, want %d", iter.count, 100)
 	}
@@ -61,10 +63,12 @@ func TestFilterNodes(t *testing.T) {
 		if !it.Next() {
 			t.Fatal("Next returned false")
 		}
+
 		if it.Node() != nodes[i] {
 			t.Fatalf("iterator returned wrong node %v\nwant %v", it.Node(), nodes[i])
 		}
 	}
+
 	if it.Next() {
 		t.Fatal("Next returned true after underlying iterator has ended")
 	}
@@ -75,16 +79,18 @@ func checkNodes(t *testing.T, nodes []*Node, wantLen int) {
 		t.Errorf("slice has %d nodes, want %d", len(nodes), wantLen)
 		return
 	}
-	seen := make(map[ID]bool)
+	seen := make(map[ID]bool, len(nodes))
 	for i, e := range nodes {
 		if e == nil {
 			t.Errorf("nil node at index %d", i)
 			return
 		}
+
 		if seen[e.ID()] {
 			t.Errorf("slice has duplicate node %v", e.ID())
 			return
 		}
+
 		seen[e.ID()] = true
 	}
 }
@@ -102,6 +108,7 @@ func testMixerFairness(t *testing.T) {
 	mix.AddSource(&genIter{index: 1})
 	mix.AddSource(&genIter{index: 2})
 	mix.AddSource(&genIter{index: 3})
+
 	defer mix.Close()
 
 	nodes := ReadNodes(mix, 500)
@@ -123,6 +130,7 @@ func TestFairMixNextFromAll(t *testing.T) {
 	mix := NewFairMix(1 * time.Millisecond)
 	mix.AddSource(&genIter{index: 1})
 	mix.AddSource(CycleNodes(nil))
+
 	defer mix.Close()
 
 	nodes := ReadNodes(mix, 500)
@@ -141,6 +149,7 @@ func TestFairMixEmpty(t *testing.T) {
 		testN = testNode(1, 1)
 		ch    = make(chan *Node)
 	)
+
 	defer mix.Close()
 
 	go func() {
@@ -149,6 +158,7 @@ func TestFairMixEmpty(t *testing.T) {
 	}()
 
 	mix.AddSource(CycleNodes([]*Node{testN}))
+
 	if n := <-ch; n != testN {
 		t.Errorf("got wrong node: %v", n)
 	}
@@ -168,18 +178,68 @@ func TestFairMixRemoveSource(t *testing.T) {
 	}()
 
 	sig <- nil
+
 	runtime.Gosched()
 	source.Close()
 
 	wantNode := testNode(0, 0)
 	mix.AddSource(CycleNodes([]*Node{wantNode}))
+
 	n := <-sig
 
 	if len(mix.sources) != 1 {
 		t.Fatalf("have %d sources, want one", len(mix.sources))
 	}
+
 	if n != wantNode {
 		t.Fatalf("mixer returned wrong node")
+	}
+}
+
+// This checks that FairMix correctly returns the name of the source that produced the node.
+func TestFairMixSourceName(t *testing.T) {
+	nodes := make([]*Node, 6)
+	for i := range nodes {
+		nodes[i] = testNode(uint64(i), uint64(i))
+	}
+	mix := NewFairMix(-1)
+	mix.AddSource(WithSourceName("s1", IterNodes(nodes[0:2])))
+	mix.AddSource(WithSourceName("s2", IterNodes(nodes[2:4])))
+	mix.AddSource(WithSourceName("s3", IterNodes(nodes[4:6])))
+
+	var names []string
+	for range nodes {
+		mix.Next()
+		names = append(names, mix.NodeSource())
+	}
+	want := []string{"s2", "s3", "s1", "s2", "s3", "s1"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("wrong names: %v", names)
+	}
+}
+
+// This checks that FairMix returns the name of the source that produced the node,
+// even when FairMix instances are nested.
+func TestFairMixNestedSourceName(t *testing.T) {
+	nodes := make([]*Node, 6)
+	for i := range nodes {
+		nodes[i] = testNode(uint64(i), uint64(i))
+	}
+	mix := NewFairMix(-1)
+	mix.AddSource(WithSourceName("s1", IterNodes(nodes[0:2])))
+	submix := NewFairMix(-1)
+	submix.AddSource(WithSourceName("s2", IterNodes(nodes[2:4])))
+	submix.AddSource(WithSourceName("s3", IterNodes(nodes[4:6])))
+	mix.AddSource(submix)
+
+	var names []string
+	for range nodes {
+		mix.Next()
+		names = append(names, mix.NodeSource())
+	}
+	want := []string{"s3", "s1", "s2", "s1", "s3", "s2"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("wrong names: %v", names)
 	}
 }
 
@@ -212,6 +272,7 @@ func testMixerClose(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		if mix.Next() {
 			t.Error("Next returned true")
 		}
@@ -231,11 +292,12 @@ func testMixerClose(t *testing.T) {
 }
 
 func idPrefixDistribution(nodes []*Node) map[uint32]int {
-	d := make(map[uint32]int)
+	d := make(map[uint32]int, len(nodes))
 	for _, node := range nodes {
 		id := node.ID()
 		d[binary.BigEndian.Uint32(id[:4])]++
 	}
+
 	return d
 }
 
@@ -243,6 +305,7 @@ func approxEqual(x, y, ε int) bool {
 	if y > x {
 		x, y = y, x
 	}
+
 	return x-y > ε
 }
 
@@ -258,8 +321,10 @@ func (s *genIter) Next() bool {
 		s.node = nil
 		return false
 	}
+
 	s.node = testNode(uint64(index)<<32|uint64(s.gen), 0)
 	s.gen++
+
 	return true
 }
 
@@ -268,14 +333,17 @@ func (s *genIter) Node() *Node {
 }
 
 func (s *genIter) Close() {
-	s.index = ^uint32(0)
+	atomic.StoreUint32(&s.index, ^uint32(0))
 }
 
 func testNode(id, seq uint64) *Node {
 	var nodeID ID
+
 	binary.BigEndian.PutUint64(nodeID[:], id)
+
 	r := new(enr.Record)
 	r.SetSeq(seq)
+
 	return SignNull(r, nodeID)
 }
 
