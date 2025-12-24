@@ -19,804 +19,506 @@ package eth
 import (
 	"errors"
 	"fmt"
-	"math/big"
+	"sort"
 	"sync"
-	"time"
 
-	mapset "github.com/deckarep/golang-set"
-	"github.com/maticnetwork/bor/common"
-	"github.com/maticnetwork/bor/core/forkid"
-	"github.com/maticnetwork/bor/core/types"
-	"github.com/maticnetwork/bor/p2p"
-	"github.com/maticnetwork/bor/rlp"
-)
-
-var (
-	errClosed            = errors.New("peer set is closed")
-	errAlreadyRegistered = errors.New("peer is already registered")
-	errNotRegistered     = errors.New("peer is not registered")
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/stateless"
+	"github.com/ethereum/go-ethereum/eth/protocols/eth"
+	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/wit"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 const (
-	maxKnownTxs    = 32768 // Maximum transactions hashes to keep in the known list (prevent DOS)
-	maxKnownBlocks = 1024  // Maximum block hashes to keep in the known list (prevent DOS)
-
-	// maxQueuedTxs is the maximum number of transactions to queue up before dropping
-	// older broadcasts.
-	maxQueuedTxs = 4096
-
-	// maxQueuedTxAnns is the maximum number of transaction announcements to queue up
-	// before dropping older announcements.
-	maxQueuedTxAnns = 4096
-
-	// maxQueuedBlocks is the maximum number of block propagations to queue up before
-	// dropping broadcasts. There's not much point in queueing stale blocks, so a few
-	// that might cover uncles should be enough.
-	maxQueuedBlocks = 4
-
-	// maxQueuedBlockAnns is the maximum number of block announcements to queue up before
-	// dropping broadcasts. Similarly to block propagations, there's no point to queue
-	// above some healthy uncle limit, so use that.
-	maxQueuedBlockAnns = 4
-
-	handshakeTimeout = 5 * time.Second
+	DefaultPagesRequestPerWitness     = 1
+	DefaultConcurrentRequestsPerPeer  = 5
+	DefaultConcurrentResponsesHandled = 10
+	DefaultMaxPagesRequestRetries     = 2
 )
 
-// max is a helper function which returns the larger of the two given integers.
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// PeerInfo represents a short summary of the Ethereum sub-protocol metadata known
+// ethPeerInfo represents a short summary of the `eth` sub-protocol metadata known
 // about a connected peer.
-type PeerInfo struct {
-	Version    int      `json:"version"`    // Ethereum protocol version negotiated
-	Difficulty *big.Int `json:"difficulty"` // Total difficulty of the peer's blockchain
-	Head       string   `json:"head"`       // SHA3 hash of the peer's best owned block
+type ethPeerInfo struct {
+	Version uint `json:"version"` // Ethereum protocol version negotiated
+	*peerBlockRange
 }
 
-// propEvent is a block propagation, waiting for its turn in the broadcast queue.
-type propEvent struct {
-	block *types.Block
-	td    *big.Int
+type peerBlockRange struct {
+	Earliest   uint64      `json:"earliestBlock"`
+	Latest     uint64      `json:"latestBlock"`
+	LatestHash common.Hash `json:"latestBlockHash"`
 }
 
-type peer struct {
-	id string
-
-	*p2p.Peer
-	rw p2p.MsgReadWriter
-
-	version  int         // Protocol version negotiated
-	syncDrop *time.Timer // Timed connection dropper if sync progress isn't validated in time
-
-	head common.Hash
-	td   *big.Int
-	lock sync.RWMutex
-
-	knownBlocks     mapset.Set        // Set of block hashes known to be known by this peer
-	queuedBlocks    chan *propEvent   // Queue of blocks to broadcast to the peer
-	queuedBlockAnns chan *types.Block // Queue of blocks to announce to the peer
-
-	knownTxs    mapset.Set                           // Set of transaction hashes known to be known by this peer
-	txBroadcast chan []common.Hash                   // Channel used to queue transaction propagation requests
-	txAnnounce  chan []common.Hash                   // Channel used to queue transaction announcement requests
-	getPooledTx func(common.Hash) *types.Transaction // Callback used to retrieve transaction from txpool
-
-	term chan struct{} // Termination channel to stop the broadcaster
+// ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
+type ethPeer struct {
+	*eth.Peer
+	snapExt *snapPeer // Satellite `snap` connection
+	witPeer *witPeer
 }
 
-func newPeer(version int, p *p2p.Peer, rw p2p.MsgReadWriter, getPooledTx func(hash common.Hash) *types.Transaction) *peer {
-	return &peer{
-		Peer:            p,
-		rw:              rw,
-		version:         version,
-		id:              fmt.Sprintf("%x", p.ID().Bytes()[:8]),
-		knownTxs:        mapset.NewSet(),
-		knownBlocks:     mapset.NewSet(),
-		queuedBlocks:    make(chan *propEvent, maxQueuedBlocks),
-		queuedBlockAnns: make(chan *types.Block, maxQueuedBlockAnns),
-		txBroadcast:     make(chan []common.Hash),
-		txAnnounce:      make(chan []common.Hash),
-		getPooledTx:     getPooledTx,
-		term:            make(chan struct{}),
+// info gathers and returns some `eth` protocol metadata known about a peer.
+// nolint:typecheck
+func (p *ethPeer) info() *ethPeerInfo {
+	info := &ethPeerInfo{Version: p.Version()}
+	if br := p.BlockRange(); br != nil {
+		info.peerBlockRange = &peerBlockRange{
+			Earliest:   br.EarliestBlock,
+			Latest:     br.LatestBlock,
+			LatestHash: br.LatestBlockHash,
+		}
+	}
+	return info
+}
+
+// snapPeerInfo represents a short summary of the `snap` sub-protocol metadata known
+// about a connected peer.
+type snapPeerInfo struct {
+	Version uint `json:"version"` // Snapshot protocol version negotiated
+}
+
+// snapPeer is a wrapper around snap.Peer to maintain a few extra metadata.
+type snapPeer struct {
+	*snap.Peer
+}
+
+// info gathers and returns some `snap` protocol metadata known about a peer.
+func (p *snapPeer) info() *snapPeerInfo {
+	return &snapPeerInfo{
+		Version: p.Version(),
 	}
 }
 
-// broadcastBlocks is a write loop that multiplexes blocks and block accouncements
-// to the remote peer. The goal is to have an async writer that does not lock up
-// node internals and at the same time rate limits queued data.
-func (p *peer) broadcastBlocks(removePeer func(string)) {
-	for {
-		select {
-		case prop := <-p.queuedBlocks:
-			if err := p.SendNewBlock(prop.block, prop.td); err != nil {
-				removePeer(p.id)
+type witPeerInfo struct {
+	Version uint `json:"version"` // Witness protocol version negotiated
+}
+
+type WitnessPeer interface {
+	// the method ethPeer.RequestWitnesses invokes
+	AsyncSendNewWitness(witness *stateless.Witness)
+	AsyncSendNewWitnessHash(hash common.Hash, number uint64)
+	RequestWitness(witnessPages []wit.WitnessPageRequest, sink chan *wit.Response) (*wit.Request, error)
+	Close()
+	ID() string
+	Version() uint
+	Log() log.Logger
+	KnownWitnesses() *wit.KnownCache
+	AddKnownWitness(hash common.Hash)
+	KnownWitnessesCount() int
+	KnownWitnessesContains(witness *stateless.Witness) bool
+	KnownWitnessContainsHash(hash common.Hash) bool
+	ReplyWitness(requestID uint64, response *wit.WitnessPacketResponse) error
+}
+
+// witPeer is wrapper around wit.Peer to maintain a few extra metadata and test compatibility.
+type witPeer struct {
+	// *wit.Peer
+	Peer WitnessPeer
+}
+
+// info gathers and returns some `wit` protocol metadata known about a peer.
+func (p *witPeer) info() *witPeerInfo {
+	return &witPeerInfo{
+		Version: p.Peer.Version(),
+	}
+}
+
+// wrapper to associate a request to it's equivalent response
+type witReqRes struct {
+	Response *wit.Response
+	Request  []wit.WitnessPageRequest
+}
+
+type witReqRetryCount struct {
+	FailCount        int
+	ShouldRetryAgain bool
+}
+
+// ethWitRequest wraps an eth.Request and holds the underlying wit.Request (which can be multiple).
+// This allows the downloader to track the request lifecycle via the eth.Request
+// while allowing cancellation to be passed to all wit.Request.
+type ethWitRequest struct {
+	*eth.Request                // Embedded eth.Request (must be non-nil)
+	witReqs      []*wit.Request // The actual witness protocol request
+}
+
+// Close overrides the embedded eth.Request's Close to also close the wit.Request
+// and signal cancellation via the embedded request's cancel channel.
+func (r *ethWitRequest) Close() error {
+	// Signal cancellation on the embedded request's channel first.
+	// Note: This assumes r.Request and r.Request.cancel are non-nil.
+	// The channel is initialized in RequestWitnesses.
+	close(r.Request.Cancel)
+
+	// Then close the underlying witnesses requests.
+	// The eth.Request shim doesn't need explicit closing here,
+	// as it's not registered with the eth dispatcher.
+	for _, witReq := range r.witReqs {
+		err := witReq.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// SupportsWitness implements downloader.Peer.
+// It returns true if the peer supports the witness protocol.
+func (p *ethPeer) SupportsWitness() bool {
+	return p.witPeer != nil
+}
+
+// RequestWitnesses implements downloader.Peer.
+// It requests witnesses using the wit protocol for the given block hashes.
+func (p *ethPeer) RequestWitnesses(hashes []common.Hash, dlResCh chan *eth.Response) (*eth.Request, error) {
+	if p.witPeer == nil {
+		return nil, errors.New("witness peer not found")
+	}
+	p.witPeer.Peer.Log().Trace("RequestWitnesses called", "peer", p.ID(), "hashes", len(hashes))
+
+	witReqResCh := make(chan *witReqRes, DefaultConcurrentResponsesHandled)
+	witReqSem := make(chan int, DefaultConcurrentRequestsPerPeer) // semaphore to limit concurrent requests
+	var witReqs []*wit.Request
+	var witReqsWg sync.WaitGroup
+	witTotalPages := make(map[common.Hash]uint64)   // witness hash and its total pages required
+	witTotalRequest := make(map[common.Hash]uint64) // witness hash and its total requests
+	failedRequests := make(map[common.Hash]map[uint64]witReqRetryCount)
+	var mapsMu sync.RWMutex
+	var buildRequestMu sync.RWMutex
+
+	// Build all the initial requests synchronously.
+	buildWitReqErr := p.buildWitnessRequests(hashes, &witReqs, &witReqsWg, witTotalPages, witTotalRequest, witReqResCh, witReqSem, &mapsMu, &buildRequestMu, failedRequests)
+	if buildWitReqErr != nil {
+		p.witPeer.Peer.Log().Error("Error in building witness requests", "peer", p.ID(), "err", buildWitReqErr)
+		return nil, buildWitReqErr
+	}
+
+	// Close the witResCh after all the requests are done.
+	go func() {
+		defer close(witReqResCh)
+		witReqsWg.Wait()
+	}()
+
+	// Create the wrapper request. Embed a minimal eth.Request shim.
+	// Its primary purpose is type compatibility for the return value.
+	// The ethWitRequest's Close method handles actual cancellation via witReq.
+	// *** Crucially, set the Peer field so the concurrent fetcher can find the peer ***
+	ethReqShim := &eth.Request{
+		Peer:   p.ID(),              // Set the Peer ID here
+		Cancel: make(chan struct{}), // Initialize the cancel channel
+	}
+	wrapperReq := &ethWitRequest{
+		Request: ethReqShim,
+		witReqs: witReqs,
+	}
+
+	// Start a goroutine to adapt responses from the wit channel to the eth channel.
+	go func() {
+		p.witPeer.Peer.Log().Trace("RequestWitnesses adapter goroutine started", "peer", p.ID())
+		defer p.witPeer.Peer.Log().Trace("RequestWitnesses adapter goroutine finished", "peer", p.ID())
+
+		receivedWitPages := make(map[common.Hash][]wit.WitnessPageResponse)
+		reconstructedWitness := make(map[common.Hash]*stateless.Witness)
+		var lastWitRes *wit.Response
+		for witRes := range witReqResCh {
+			p.receiveWitnessPage(witRes, receivedWitPages, reconstructedWitness, hashes, &witReqs, &witReqsWg, witTotalPages, witTotalRequest, witReqResCh, witReqSem, &mapsMu, &buildRequestMu, failedRequests)
+
+			<-witReqSem
+			// Check if the Response is nil before accessing the Done channel.
+			if witRes.Response != nil && witRes.Response.Done != nil {
+				witRes.Response.Done <- nil
+				lastWitRes = witRes.Response
+			}
+			witReqsWg.Done()
+		}
+		p.witPeer.Peer.Log().Trace("RequestWitnesses adapter finished receiving responses", "peer", p.ID())
+
+		// Check if we successfully received and processed witness data from the peer.
+		// This prevents nil pointer dereference by checking multiple failure scenarios.
+		// - len(receivedWitPages) == 0: No witness pages received at all.
+		// - len(reconstructedWitness) == 0: No witness data reconstructed from the received pages.
+		// - lastWitRes == nil: Same as len(reconstructedWitness) == 0, because if we have even one valid witness, lastWitRes will not be nil.
+		if len(receivedWitPages) == 0 || len(reconstructedWitness) == 0 || lastWitRes == nil {
+			p.witPeer.Peer.Log().Warn("Empty response received for witnesses requested from peer", "peer", p.ID(), "requestedHashes", hashes)
+
+			doneCh := make(chan error)
+			go func() {
+				<-doneCh
+			}()
+
+			emptyWitnesses := make([]*stateless.Witness, 0)
+			emptyRes := &eth.Response{
+				Req:  wrapperReq.Request,
+				Res:  emptyWitnesses,
+				Meta: nil,
+				Time: 0,
+				Done: doneCh,
+			}
+
+			select {
+			case dlResCh <- emptyRes:
+				p.witPeer.Peer.Log().Trace("RequestWitnesses sent empty response because of empty witness data received from peer", "peer", p.ID())
+			case <-wrapperReq.Request.Cancel:
+				p.witPeer.Peer.Log().Trace("RequestWitnesses cancelled before sending empty response", "peer", p.ID())
 				return
 			}
-			p.Log().Trace("Propagated block", "number", prop.block.Number(), "hash", prop.block.Hash(), "td", prop.td)
-
-		case block := <-p.queuedBlockAnns:
-			if err := p.SendNewBlockHashes([]common.Hash{block.Hash()}, []uint64{block.NumberU64()}); err != nil {
-				removePeer(p.id)
-				return
-			}
-			p.Log().Trace("Announced block", "number", block.Number(), "hash", block.Hash())
-
-		case <-p.term:
 			return
 		}
-	}
-}
 
-// broadcastTransactions is a write loop that schedules transaction broadcasts
-// to the remote peer. The goal is to have an async writer that does not lock up
-// node internals and at the same time rate limits queued data.
-func (p *peer) broadcastTransactions(removePeer func(string)) {
-	var (
-		queue []common.Hash         // Queue of hashes to broadcast as full transactions
-		done  chan struct{}         // Non-nil if background broadcaster is running
-		fail  = make(chan error, 1) // Channel used to receive network error
-	)
-	for {
-		// If there's no in-flight broadcast running, check if a new one is needed
-		if done == nil && len(queue) > 0 {
-			// Pile transaction until we reach our allowed network limit
-			var (
-				hashes []common.Hash
-				txs    []*types.Transaction
-				size   common.StorageSize
-			)
-			for i := 0; i < len(queue) && size < txsyncPackSize; i++ {
-				if tx := p.getPooledTx(queue[i]); tx != nil {
-					txs = append(txs, tx)
-					size += tx.Size()
-				}
-				hashes = append(hashes, queue[i])
-			}
-			queue = queue[:copy(queue, queue[len(hashes):])]
-
-			// If there's anything available to transfer, fire up an async writer
-			if len(txs) > 0 {
-				done = make(chan struct{})
-				go func() {
-					if err := p.sendTransactions(txs); err != nil {
-						fail <- err
-						return
-					}
-					close(done)
-					p.Log().Trace("Sent transactions", "count", len(txs))
-				}()
-			}
+		var witnesses []*stateless.Witness
+		var responseHashes []common.Hash
+		for hash, wit := range reconstructedWitness {
+			witnesses = append(witnesses, wit)
+			responseHashes = append(responseHashes, hash)
 		}
-		// Transfer goroutine may or may not have been started, listen for events
+		if len(witnesses) != len(hashes) {
+			p.witPeer.Peer.Log().Error("Not able to fetch all requests witnesses", "peer", p.ID(), "requestedHashes", hashes, "responseHashes", responseHashes)
+		}
+		doneCh := make(chan error)
+		go func() {
+			<-doneCh
+		}()
+
+		// Adapt wit.Response[] to eth.Response.
+		// We can only copy exported fields. The unexported fields (id, recv, code)
+		// will have zero values in the ethRes sent to the caller.
+		// Correlation still works via the Req field.
+		ethRes := &eth.Response{
+			Req:  wrapperReq.Request, // Point back to the embedded shim request.
+			Res:  witnesses,
+			Meta: lastWitRes.Meta,
+			Time: lastWitRes.Time,
+			Done: doneCh, // Send an ephemeral doneCh to keep compatibility.
+		}
+
+		// Forward the adapted response to the downloader's channel,
+		// or stop if the request has been cancelled.
 		select {
-		case hashes := <-p.txBroadcast:
-			// New batch of transactions to be broadcast, queue them (with cap)
-			queue = append(queue, hashes...)
-			if len(queue) > maxQueuedTxs {
-				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
-				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxs:])]
-			}
-
-		case <-done:
-			done = nil
-
-		case <-fail:
-			removePeer(p.id)
+		case dlResCh <- ethRes:
+			p.witPeer.Peer.Log().Trace("RequestWitnesses adapter forwarded eth response", "peer", p.ID())
+		case <-wrapperReq.Request.Cancel:
+			p.witPeer.Peer.Log().Trace("RequestWitnesses adapter cancelled before forwarding response", "peer", p.ID())
+			// If cancelled, exit the goroutine. The closing of witResCh
+			// will also eventually terminate the loop, but returning
+			// here ensures we don't block trying to send after cancellation.
 			return
-
-		case <-p.term:
-			return
-		}
-	}
-}
-
-// announceTransactions is a write loop that schedules transaction broadcasts
-// to the remote peer. The goal is to have an async writer that does not lock up
-// node internals and at the same time rate limits queued data.
-func (p *peer) announceTransactions(removePeer func(string)) {
-	var (
-		queue []common.Hash         // Queue of hashes to announce as transaction stubs
-		done  chan struct{}         // Non-nil if background announcer is running
-		fail  = make(chan error, 1) // Channel used to receive network error
-	)
-	for {
-		// If there's no in-flight announce running, check if a new one is needed
-		if done == nil && len(queue) > 0 {
-			// Pile transaction hashes until we reach our allowed network limit
-			var (
-				hashes  []common.Hash
-				pending []common.Hash
-				size    common.StorageSize
-			)
-			for i := 0; i < len(queue) && size < txsyncPackSize; i++ {
-				if p.getPooledTx(queue[i]) != nil {
-					pending = append(pending, queue[i])
-					size += common.HashLength
-				}
-				hashes = append(hashes, queue[i])
-			}
-			queue = queue[:copy(queue, queue[len(hashes):])]
-
-			// If there's anything available to transfer, fire up an async writer
-			if len(pending) > 0 {
-				done = make(chan struct{})
-				go func() {
-					if err := p.sendPooledTransactionHashes(pending); err != nil {
-						fail <- err
-						return
-					}
-					close(done)
-					p.Log().Trace("Sent transaction announcements", "count", len(pending))
-				}()
-			}
-		}
-		// Transfer goroutine may or may not have been started, listen for events
-		select {
-		case hashes := <-p.txAnnounce:
-			// New batch of transactions to be broadcast, queue them (with cap)
-			queue = append(queue, hashes...)
-			if len(queue) > maxQueuedTxAnns {
-				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
-				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxs:])]
-			}
-
-		case <-done:
-			done = nil
-
-		case <-fail:
-			removePeer(p.id)
-			return
-
-		case <-p.term:
-			return
-		}
-	}
-}
-
-// close signals the broadcast goroutine to terminate.
-func (p *peer) close() {
-	close(p.term)
-}
-
-// Info gathers and returns a collection of metadata known about a peer.
-func (p *peer) Info() *PeerInfo {
-	hash, td := p.Head()
-
-	return &PeerInfo{
-		Version:    p.version,
-		Difficulty: td,
-		Head:       hash.Hex(),
-	}
-}
-
-// Head retrieves a copy of the current head hash and total difficulty of the
-// peer.
-func (p *peer) Head() (hash common.Hash, td *big.Int) {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	copy(hash[:], p.head[:])
-	return hash, new(big.Int).Set(p.td)
-}
-
-// SetHead updates the head hash and total difficulty of the peer.
-func (p *peer) SetHead(hash common.Hash, td *big.Int) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	copy(p.head[:], hash[:])
-	p.td.Set(td)
-}
-
-// MarkBlock marks a block as known for the peer, ensuring that the block will
-// never be propagated to this particular peer.
-func (p *peer) MarkBlock(hash common.Hash) {
-	// If we reached the memory allowance, drop a previously known block hash
-	for p.knownBlocks.Cardinality() >= maxKnownBlocks {
-		p.knownBlocks.Pop()
-	}
-	p.knownBlocks.Add(hash)
-}
-
-// MarkTransaction marks a transaction as known for the peer, ensuring that it
-// will never be propagated to this particular peer.
-func (p *peer) MarkTransaction(hash common.Hash) {
-	// If we reached the memory allowance, drop a previously known transaction hash
-	for p.knownTxs.Cardinality() >= maxKnownTxs {
-		p.knownTxs.Pop()
-	}
-	p.knownTxs.Add(hash)
-}
-
-// SendTransactions64 sends transactions to the peer and includes the hashes
-// in its transaction hash set for future reference.
-//
-// This method is legacy support for initial transaction exchange in eth/64 and
-// prior. For eth/65 and higher use SendPooledTransactionHashes.
-func (p *peer) SendTransactions64(txs types.Transactions) error {
-	return p.sendTransactions(txs)
-}
-
-// sendTransactions sends transactions to the peer and includes the hashes
-// in its transaction hash set for future reference.
-//
-// This method is a helper used by the async transaction sender. Don't call it
-// directly as the queueing (memory) and transmission (bandwidth) costs should
-// not be managed directly.
-func (p *peer) sendTransactions(txs types.Transactions) error {
-	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(txs)) {
-		p.knownTxs.Pop()
-	}
-	for _, tx := range txs {
-		p.knownTxs.Add(tx.Hash())
-	}
-	return p2p.Send(p.rw, TransactionMsg, txs)
-}
-
-// AsyncSendTransactions queues a list of transactions (by hash) to eventually
-// propagate to a remote peer. The number of pending sends are capped (new ones
-// will force old sends to be dropped)
-func (p *peer) AsyncSendTransactions(hashes []common.Hash) {
-	select {
-	case p.txBroadcast <- hashes:
-		// Mark all the transactions as known, but ensure we don't overflow our limits
-		for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
-			p.knownTxs.Pop()
-		}
-		for _, hash := range hashes {
-			p.knownTxs.Add(hash)
-		}
-	case <-p.term:
-		p.Log().Debug("Dropping transaction propagation", "count", len(hashes))
-	}
-}
-
-// sendPooledTransactionHashes sends transaction hashes to the peer and includes
-// them in its transaction hash set for future reference.
-//
-// This method is a helper used by the async transaction announcer. Don't call it
-// directly as the queueing (memory) and transmission (bandwidth) costs should
-// not be managed directly.
-func (p *peer) sendPooledTransactionHashes(hashes []common.Hash) error {
-	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
-		p.knownTxs.Pop()
-	}
-	for _, hash := range hashes {
-		p.knownTxs.Add(hash)
-	}
-	return p2p.Send(p.rw, NewPooledTransactionHashesMsg, hashes)
-}
-
-// AsyncSendPooledTransactionHashes queues a list of transactions hashes to eventually
-// announce to a remote peer.  The number of pending sends are capped (new ones
-// will force old sends to be dropped)
-func (p *peer) AsyncSendPooledTransactionHashes(hashes []common.Hash) {
-	select {
-	case p.txAnnounce <- hashes:
-		// Mark all the transactions as known, but ensure we don't overflow our limits
-		for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
-			p.knownTxs.Pop()
-		}
-		for _, hash := range hashes {
-			p.knownTxs.Add(hash)
-		}
-	case <-p.term:
-		p.Log().Debug("Dropping transaction announcement", "count", len(hashes))
-	}
-}
-
-// SendPooledTransactionsRLP sends requested transactions to the peer and adds the
-// hashes in its transaction hash set for future reference.
-//
-// Note, the method assumes the hashes are correct and correspond to the list of
-// transactions being sent.
-func (p *peer) SendPooledTransactionsRLP(hashes []common.Hash, txs []rlp.RawValue) error {
-	// Mark all the transactions as known, but ensure we don't overflow our limits
-	for p.knownTxs.Cardinality() > max(0, maxKnownTxs-len(hashes)) {
-		p.knownTxs.Pop()
-	}
-	for _, hash := range hashes {
-		p.knownTxs.Add(hash)
-	}
-	return p2p.Send(p.rw, PooledTransactionsMsg, txs)
-}
-
-// SendNewBlockHashes announces the availability of a number of blocks through
-// a hash notification.
-func (p *peer) SendNewBlockHashes(hashes []common.Hash, numbers []uint64) error {
-	// Mark all the block hashes as known, but ensure we don't overflow our limits
-	for p.knownBlocks.Cardinality() > max(0, maxKnownBlocks-len(hashes)) {
-		p.knownBlocks.Pop()
-	}
-	for _, hash := range hashes {
-		p.knownBlocks.Add(hash)
-	}
-	request := make(newBlockHashesData, len(hashes))
-	for i := 0; i < len(hashes); i++ {
-		request[i].Hash = hashes[i]
-		request[i].Number = numbers[i]
-	}
-	return p2p.Send(p.rw, NewBlockHashesMsg, request)
-}
-
-// AsyncSendNewBlockHash queues the availability of a block for propagation to a
-// remote peer. If the peer's broadcast queue is full, the event is silently
-// dropped.
-func (p *peer) AsyncSendNewBlockHash(block *types.Block) {
-	select {
-	case p.queuedBlockAnns <- block:
-		// Mark all the block hash as known, but ensure we don't overflow our limits
-		for p.knownBlocks.Cardinality() >= maxKnownBlocks {
-			p.knownBlocks.Pop()
-		}
-		p.knownBlocks.Add(block.Hash())
-	default:
-		p.Log().Debug("Dropping block announcement", "number", block.NumberU64(), "hash", block.Hash())
-	}
-}
-
-// SendNewBlock propagates an entire block to a remote peer.
-func (p *peer) SendNewBlock(block *types.Block, td *big.Int) error {
-	// Mark all the block hash as known, but ensure we don't overflow our limits
-	for p.knownBlocks.Cardinality() >= maxKnownBlocks {
-		p.knownBlocks.Pop()
-	}
-	p.knownBlocks.Add(block.Hash())
-	return p2p.Send(p.rw, NewBlockMsg, []interface{}{block, td})
-}
-
-// AsyncSendNewBlock queues an entire block for propagation to a remote peer. If
-// the peer's broadcast queue is full, the event is silently dropped.
-func (p *peer) AsyncSendNewBlock(block *types.Block, td *big.Int) {
-	select {
-	case p.queuedBlocks <- &propEvent{block: block, td: td}:
-		// Mark all the block hash as known, but ensure we don't overflow our limits
-		for p.knownBlocks.Cardinality() >= maxKnownBlocks {
-			p.knownBlocks.Pop()
-		}
-		p.knownBlocks.Add(block.Hash())
-	default:
-		p.Log().Debug("Dropping block propagation", "number", block.NumberU64(), "hash", block.Hash())
-	}
-}
-
-// SendBlockHeaders sends a batch of block headers to the remote peer.
-func (p *peer) SendBlockHeaders(headers []*types.Header) error {
-	return p2p.Send(p.rw, BlockHeadersMsg, headers)
-}
-
-// SendBlockBodies sends a batch of block contents to the remote peer.
-func (p *peer) SendBlockBodies(bodies []*blockBody) error {
-	return p2p.Send(p.rw, BlockBodiesMsg, blockBodiesData(bodies))
-}
-
-// SendBlockBodiesRLP sends a batch of block contents to the remote peer from
-// an already RLP encoded format.
-func (p *peer) SendBlockBodiesRLP(bodies []rlp.RawValue) error {
-	return p2p.Send(p.rw, BlockBodiesMsg, bodies)
-}
-
-// SendNodeDataRLP sends a batch of arbitrary internal data, corresponding to the
-// hashes requested.
-func (p *peer) SendNodeData(data [][]byte) error {
-	return p2p.Send(p.rw, NodeDataMsg, data)
-}
-
-// SendReceiptsRLP sends a batch of transaction receipts, corresponding to the
-// ones requested from an already RLP encoded format.
-func (p *peer) SendReceiptsRLP(receipts []rlp.RawValue) error {
-	return p2p.Send(p.rw, ReceiptsMsg, receipts)
-}
-
-// RequestOneHeader is a wrapper around the header query functions to fetch a
-// single header. It is used solely by the fetcher.
-func (p *peer) RequestOneHeader(hash common.Hash) error {
-	p.Log().Debug("Fetching single header", "hash", hash)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Hash: hash}, Amount: uint64(1), Skip: uint64(0), Reverse: false})
-}
-
-// RequestHeadersByHash fetches a batch of blocks' headers corresponding to the
-// specified header query, based on the hash of an origin block.
-func (p *peer) RequestHeadersByHash(origin common.Hash, amount int, skip int, reverse bool) error {
-	p.Log().Debug("Fetching batch of headers", "count", amount, "fromhash", origin, "skip", skip, "reverse", reverse)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Hash: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
-}
-
-// RequestHeadersByNumber fetches a batch of blocks' headers corresponding to the
-// specified header query, based on the number of an origin block.
-func (p *peer) RequestHeadersByNumber(origin uint64, amount int, skip int, reverse bool) error {
-	p.Log().Debug("Fetching batch of headers", "count", amount, "fromnum", origin, "skip", skip, "reverse", reverse)
-	return p2p.Send(p.rw, GetBlockHeadersMsg, &getBlockHeadersData{Origin: hashOrNumber{Number: origin}, Amount: uint64(amount), Skip: uint64(skip), Reverse: reverse})
-}
-
-// RequestBodies fetches a batch of blocks' bodies corresponding to the hashes
-// specified.
-func (p *peer) RequestBodies(hashes []common.Hash) error {
-	p.Log().Debug("Fetching batch of block bodies", "count", len(hashes))
-	return p2p.Send(p.rw, GetBlockBodiesMsg, hashes)
-}
-
-// RequestNodeData fetches a batch of arbitrary data from a node's known state
-// data, corresponding to the specified hashes.
-func (p *peer) RequestNodeData(hashes []common.Hash) error {
-	p.Log().Debug("Fetching batch of state data", "count", len(hashes))
-	return p2p.Send(p.rw, GetNodeDataMsg, hashes)
-}
-
-// RequestReceipts fetches a batch of transaction receipts from a remote node.
-func (p *peer) RequestReceipts(hashes []common.Hash) error {
-	p.Log().Debug("Fetching batch of receipts", "count", len(hashes))
-	return p2p.Send(p.rw, GetReceiptsMsg, hashes)
-}
-
-// RequestTxs fetches a batch of transactions from a remote node.
-func (p *peer) RequestTxs(hashes []common.Hash) error {
-	p.Log().Debug("Fetching batch of transactions", "count", len(hashes))
-	return p2p.Send(p.rw, GetPooledTransactionsMsg, hashes)
-}
-
-// Handshake executes the eth protocol handshake, negotiating version number,
-// network IDs, difficulties, head and genesis blocks.
-func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
-	// Send out own handshake in a new thread
-	errc := make(chan error, 2)
-
-	var (
-		status63 statusData63 // safe to read after two values have been received from errc
-		status   statusData   // safe to read after two values have been received from errc
-	)
-	go func() {
-		switch {
-		case p.version == eth63:
-			errc <- p2p.Send(p.rw, StatusMsg, &statusData63{
-				ProtocolVersion: uint32(p.version),
-				NetworkId:       network,
-				TD:              td,
-				CurrentBlock:    head,
-				GenesisBlock:    genesis,
-			})
-		case p.version >= eth64:
-			errc <- p2p.Send(p.rw, StatusMsg, &statusData{
-				ProtocolVersion: uint32(p.version),
-				NetworkID:       network,
-				TD:              td,
-				Head:            head,
-				Genesis:         genesis,
-				ForkID:          forkID,
-			})
-		default:
-			panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
 		}
 	}()
-	go func() {
-		switch {
-		case p.version == eth63:
-			errc <- p.readStatusLegacy(network, &status63, genesis)
-		case p.version >= eth64:
-			errc <- p.readStatus(network, &status, genesis, forkFilter)
-		default:
-			panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
+
+	// Return the embedded *eth.Request part of the wrapper.
+	// This satisfies the function signature.
+	p.witPeer.Peer.Log().Trace("RequestWitnesses returning ethReq shim", "peer", p.ID())
+	return wrapperReq.Request, nil
+}
+
+func (p *ethPeer) receiveWitnessPage(
+	witReqRes *witReqRes,
+	receivedWitPages map[common.Hash][]wit.WitnessPageResponse,
+	reconstructedWitness map[common.Hash]*stateless.Witness,
+	hashes []common.Hash,
+	witReqs *[]*wit.Request,
+	witReqsWg *sync.WaitGroup,
+	witTotalPages map[common.Hash]uint64,
+	witTotalRequest map[common.Hash]uint64,
+	witResCh chan *witReqRes,
+	witReqSem chan int,
+	mapsMu *sync.RWMutex,
+	buildRequestMu *sync.RWMutex,
+	failedRequests map[common.Hash]map[uint64]witReqRetryCount,
+) (retrievedError error) {
+	defer func() {
+		// if fails map on retry count and request again
+		if retrievedError != nil {
+			for _, request := range witReqRes.Request {
+				if failedRequests[request.Hash] == nil {
+					failedRequests[request.Hash] = make(map[uint64]witReqRetryCount)
+				}
+				retryCount := failedRequests[request.Hash][request.Page]
+				retryCount.FailCount++
+				if retryCount.FailCount <= DefaultMaxPagesRequestRetries {
+					retryCount.ShouldRetryAgain = true
+				}
+				failedRequests[request.Hash][request.Page] = retryCount
+			}
+
+			// non blocking call to avoid race condition because of semaphore
+			witReqsWg.Add(1) // protecting from not finishing before requests are built
+			go func() {
+				buildWitReqErr := p.buildWitnessRequests(hashes, witReqs, witReqsWg, witTotalPages, witTotalRequest, witResCh, witReqSem, mapsMu, buildRequestMu, failedRequests)
+				if buildWitReqErr != nil {
+					p.witPeer.Peer.Log().Error("Error in building witness requests", "peer", p.ID(), "err", buildWitReqErr)
+				}
+				witReqsWg.Done()
+			}()
 		}
 	}()
-	timeout := time.NewTimer(handshakeTimeout)
-	defer timeout.Stop()
-	for i := 0; i < 2; i++ {
-		select {
-		case err := <-errc:
+
+	// Check if the Response is nil.
+	if witReqRes.Response == nil {
+		p.witPeer.Peer.Log().Warn("RequestWitnesses received nil response from peer", "peer", p.ID())
+		return errors.New("received nil response")
+	}
+
+	witPacketPtr, ok := witReqRes.Response.Res.(*wit.WitnessPacketRLPPacket)
+	if !ok {
+		p.witPeer.Peer.Log().Error("RequestWitnesses received unexpected response type", "type", fmt.Sprintf("%T", witReqRes.Response), "peer", p.ID())
+		return errors.New("RequestWitnesses received unexpected response type")
+	}
+
+	for _, page := range witPacketPtr.WitnessPacketResponse {
+		p.witPeer.Peer.Log().Trace("RequestWitnesses adapter received wit page response", "peer", p.ID(), "hash", page.Hash, "page", page.Page, "TotalPages", page.TotalPages, "lenData", len(page.Data))
+		if len(page.Data) == 0 {
+			continue
+		}
+
+		receivedWitPages[page.Hash] = append(receivedWitPages[page.Hash], page)
+		if len(receivedWitPages[page.Hash]) == int(page.TotalPages) {
+			wit, err := p.reconstructWitness(receivedWitPages[page.Hash])
 			if err != nil {
 				return err
 			}
-		case <-timeout.C:
-			return p2p.DiscReadTimeout
+			reconstructedWitness[page.Hash] = wit
 		}
-	}
-	switch {
-	case p.version == eth63:
-		p.td, p.head = status63.TD, status63.CurrentBlock
-	case p.version >= eth64:
-		p.td, p.head = status.TD, status.Head
-	default:
-		panic(fmt.Sprintf("unsupported eth protocol version: %d", p.version))
+
+		// check and build any remaining witnessRequest for the witnesses we dont know previously the totalPages
+		mapsMu.Lock()
+		witTotalPages[page.Hash] = page.TotalPages
+		mapsMu.Unlock()
+
+		// non blocking call to avoid race condition because of semaphore
+		witReqsWg.Add(1) // protecting from not finishing before requests are built
+		go func() {
+			buildWitReqErr := p.buildWitnessRequests(hashes, witReqs, witReqsWg, witTotalPages, witTotalRequest, witResCh, witReqSem, mapsMu, buildRequestMu, failedRequests)
+			if buildWitReqErr != nil {
+				p.witPeer.Peer.Log().Error("Error in building witness requests", "peer", p.ID(), "err", buildWitReqErr)
+			}
+			witReqsWg.Done()
+		}()
 	}
 	return nil
 }
 
-func (p *peer) readStatusLegacy(network uint64, status *statusData63, genesis common.Hash) error {
-	msg, err := p.rw.ReadMsg()
+func (p *ethPeer) reconstructWitness(pages []wit.WitnessPageResponse) (*stateless.Witness, error) {
+	// sort pages
+	sort.Slice(pages, func(i, j int) bool {
+		return pages[i].Page < pages[j].Page
+	})
+
+	var reconstructedWitnessRLPBytes []byte
+	for _, page := range pages {
+		reconstructedWitnessRLPBytes = append(reconstructedWitnessRLPBytes, page.Data...)
+	}
+
+	wit := new(stateless.Witness)
+	if err := rlp.DecodeBytes(reconstructedWitnessRLPBytes, wit); err != nil {
+		p.witPeer.Peer.Log().Warn("RequestWitnesses adapter failed to decode witness page RLP", "err", err)
+		return nil, err
+	}
+	return wit, nil
+}
+
+func (p *ethPeer) buildWitnessRequests(hashes []common.Hash,
+	witReqs *[]*wit.Request,
+	witReqsWg *sync.WaitGroup,
+	witTotalPages map[common.Hash]uint64,
+	witTotalRequest map[common.Hash]uint64,
+	witReqResCh chan *witReqRes,
+	witReqSem chan int,
+	mapsMu *sync.RWMutex,
+	buildRequestMu *sync.RWMutex,
+	failedRequests map[common.Hash]map[uint64]witReqRetryCount,
+) error {
+	buildRequestMu.Lock()
+	defer buildRequestMu.Unlock()
+
+	//checking requests to be done
+	for _, hash := range hashes {
+		mapsMu.RLock()
+		start := witTotalRequest[hash]
+		end, ok := witTotalPages[hash]
+		mapsMu.RUnlock()
+		if !ok || end == 0 {
+			end = DefaultPagesRequestPerWitness
+		}
+
+		for page := start; page < end; page++ {
+			if err := p.doWitnessRequest(
+				hash,
+				page,
+				witReqs,
+				witReqsWg,
+				witReqResCh,
+				witReqSem,
+				mapsMu,
+				witTotalRequest,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	// checking failed requests to retry
+	for hash, _ := range failedRequests {
+		for page, _ := range failedRequests[hash] {
+			retryCount := failedRequests[hash][page]
+			if retryCount.ShouldRetryAgain {
+				if err := p.doWitnessRequest(
+					hash,
+					page,
+					witReqs,
+					witReqsWg,
+					witReqResCh,
+					witReqSem,
+					mapsMu,
+					witTotalRequest,
+				); err != nil {
+					return err
+				}
+				retryCount.ShouldRetryAgain = false
+			}
+			failedRequests[hash][page] = retryCount
+		}
+	}
+	return nil
+}
+
+// doWitnessRequest handles creating and dispatching a single witness request for a given hash and page.
+func (p *ethPeer) doWitnessRequest(
+	hash common.Hash,
+	page uint64,
+	witReqs *[]*wit.Request,
+	witReqsWg *sync.WaitGroup,
+	witReqResCh chan *witReqRes,
+	witReqSem chan int,
+	mapsMu *sync.RWMutex,
+	witTotalRequest map[common.Hash]uint64,
+) error {
+	p.witPeer.Peer.Log().Debug("RequestWitnesses building a wit request", "peer", p.ID(), "hash", hash, "page", page)
+	witReqSem <- 1
+	witResCh := make(chan *wit.Response)
+	request := []wit.WitnessPageRequest{{Hash: hash, Page: page}}
+	witReq, err := p.witPeer.Peer.RequestWitness(request, witResCh)
 	if err != nil {
+		p.witPeer.Peer.Log().Error("Error in making wit request", "peer", p.ID(), "err", err)
 		return err
 	}
-	if msg.Code != StatusMsg {
-		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, StatusMsg)
-	}
-	if msg.Size > protocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, protocolMaxMsgSize)
-	}
-	// Decode the handshake and make sure everything matches
-	if err := msg.Decode(&status); err != nil {
-		return errResp(ErrDecode, "msg %v: %v", msg, err)
-	}
-	if status.GenesisBlock != genesis {
-		return errResp(ErrGenesisMismatch, "%x (!= %x)", status.GenesisBlock[:8], genesis[:8])
-	}
-	if status.NetworkId != network {
-		return errResp(ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkId, network)
-	}
-	if int(status.ProtocolVersion) != p.version {
-		return errResp(ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, p.version)
-	}
-	return nil
-}
-
-func (p *peer) readStatus(network uint64, status *statusData, genesis common.Hash, forkFilter forkid.Filter) error {
-	msg, err := p.rw.ReadMsg()
-	if err != nil {
-		return err
-	}
-	if msg.Code != StatusMsg {
-		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, StatusMsg)
-	}
-	if msg.Size > protocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, protocolMaxMsgSize)
-	}
-	// Decode the handshake and make sure everything matches
-	if err := msg.Decode(&status); err != nil {
-		return errResp(ErrDecode, "msg %v: %v", msg, err)
-	}
-	if status.NetworkID != network {
-		return errResp(ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkID, network)
-	}
-	if int(status.ProtocolVersion) != p.version {
-		return errResp(ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, p.version)
-	}
-	if status.Genesis != genesis {
-		return errResp(ErrGenesisMismatch, "%x (!= %x)", status.Genesis, genesis)
-	}
-	if err := forkFilter(status.ForkID); err != nil {
-		return errResp(ErrForkIDRejected, "%v", err)
-	}
-	return nil
-}
-
-// String implements fmt.Stringer.
-func (p *peer) String() string {
-	return fmt.Sprintf("Peer %s [%s]", p.id,
-		fmt.Sprintf("eth/%2d", p.version),
-	)
-}
-
-// peerSet represents the collection of active peers currently participating in
-// the Ethereum sub-protocol.
-type peerSet struct {
-	peers  map[string]*peer
-	lock   sync.RWMutex
-	closed bool
-}
-
-// newPeerSet creates a new peer set to track the active participants.
-func newPeerSet() *peerSet {
-	return &peerSet{
-		peers: make(map[string]*peer),
-	}
-}
-
-// Register injects a new peer into the working set, or returns an error if the
-// peer is already known. If a new peer it registered, its broadcast loop is also
-// started.
-func (ps *peerSet) Register(p *peer, removePeer func(string)) error {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-
-	if ps.closed {
-		return errClosed
-	}
-	if _, ok := ps.peers[p.id]; ok {
-		return errAlreadyRegistered
-	}
-	ps.peers[p.id] = p
-
-	go p.broadcastBlocks(removePeer)
-	go p.broadcastTransactions(removePeer)
-	if p.version >= eth65 {
-		go p.announceTransactions(removePeer)
-	}
-	return nil
-}
-
-// Unregister removes a remote peer from the active set, disabling any further
-// actions to/from that particular entity.
-func (ps *peerSet) Unregister(id string) error {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-
-	p, ok := ps.peers[id]
-	if !ok {
-		return errNotRegistered
-	}
-	delete(ps.peers, id)
-	p.close()
-
-	return nil
-}
-
-// Peer retrieves the registered peer with the given id.
-func (ps *peerSet) Peer(id string) *peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	return ps.peers[id]
-}
-
-// Len returns if the current number of peers in the set.
-func (ps *peerSet) Len() int {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	return len(ps.peers)
-}
-
-// PeersWithoutBlock retrieves a list of peers that do not have a given block in
-// their set of known hashes.
-func (ps *peerSet) PeersWithoutBlock(hash common.Hash) []*peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	list := make([]*peer, 0, len(ps.peers))
-	for _, p := range ps.peers {
-		if !p.knownBlocks.Contains(hash) {
-			list = append(list, p)
+	go func() {
+		witRes := <-witResCh
+		// fan in to group all responses in single WitReqResCh
+		witReqResCh <- &witReqRes{
+			Request:  request,
+			Response: witRes,
 		}
+	}()
+	witReqsWg.Add(1)
+	*witReqs = append(*witReqs, witReq)
+
+	if page >= witTotalRequest[hash] {
+		mapsMu.Lock()
+		witTotalRequest[hash]++
+		mapsMu.Unlock()
 	}
-	return list
-}
 
-// PeersWithoutTx retrieves a list of peers that do not have a given transaction
-// in their set of known hashes.
-func (ps *peerSet) PeersWithoutTx(hash common.Hash) []*peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	list := make([]*peer, 0, len(ps.peers))
-	for _, p := range ps.peers {
-		if !p.knownTxs.Contains(hash) {
-			list = append(list, p)
-		}
-	}
-	return list
-}
-
-// BestPeer retrieves the known peer with the currently highest total difficulty.
-func (ps *peerSet) BestPeer() *peer {
-	ps.lock.RLock()
-	defer ps.lock.RUnlock()
-
-	var (
-		bestPeer *peer
-		bestTd   *big.Int
-	)
-	for _, p := range ps.peers {
-		if _, td := p.Head(); bestPeer == nil || td.Cmp(bestTd) > 0 {
-			bestPeer, bestTd = p, td
-		}
-	}
-	return bestPeer
-}
-
-// Close disconnects all peers.
-// No new peers can be registered after Close has returned.
-func (ps *peerSet) Close() {
-	ps.lock.Lock()
-	defer ps.lock.Unlock()
-
-	for _, p := range ps.peers {
-		p.Disconnect(p2p.DiscQuitting)
-	}
-	ps.closed = true
+	return nil
 }
