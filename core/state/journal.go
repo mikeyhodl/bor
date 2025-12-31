@@ -23,7 +23,6 @@ import (
 	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/blockstm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 )
@@ -324,7 +323,6 @@ func (ch selfDestructChange) revert(s *StateDB) {
 	obj := s.getStateObject(ch.account)
 	if obj != nil {
 		obj.selfDestructed = false
-		RevertWrite(s, blockstm.NewSubpathKey(ch.account, SuicidePath))
 	}
 }
 
