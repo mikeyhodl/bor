@@ -34,4 +34,14 @@ var (
 	// ErrInvalidNumber is returned if a block's number doesn't equal its parent's
 	// plus one.
 	ErrInvalidNumber = errors.New("invalid block number")
+
+	// ErrInvalidTerminalBlock is returned if a block is invalid wrt. the terminal
+	// total difficulty.
+	ErrInvalidTerminalBlock = errors.New("invalid terminal block")
+
+	// ErrUnexpectedWithdrawals is returned if a pre-Shanghai block has withdrawals.
+	ErrUnexpectedWithdrawals = errors.New("unexpected withdrawals")
+
+	// ErrUnexpectedRequests is returned if a pre-Shanghai block has requests.
+	ErrUnexpectedRequests = errors.New("unexpected requests")
 )

@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/maticnetwork/bor/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb"
 )
 
 func TestTableDatabase(t *testing.T)            { testTableDatabase(t, "prefix") }
@@ -61,11 +61,13 @@ func testTableDatabase(t *testing.T, prefix string) {
 	for _, entry := range entries {
 		db.Put(entry.key, entry.value)
 	}
+
 	for _, entry := range entries {
 		got, err := db.Get(entry.key)
 		if err != nil {
 			t.Fatalf("Failed to get value: %v", err)
 		}
+
 		if !bytes.Equal(got, entry.value) {
 			t.Fatalf("Value mismatch: want=%v, got=%v", entry.value, got)
 		}
@@ -73,16 +75,20 @@ func testTableDatabase(t *testing.T, prefix string) {
 
 	// Test batch operation
 	db = NewTable(NewMemoryDatabase(), prefix)
+
 	batch := db.NewBatch()
 	for _, entry := range entries {
 		batch.Put(entry.key, entry.value)
 	}
+
 	batch.Write()
+
 	for _, entry := range entries {
 		got, err := db.Get(entry.key)
 		if err != nil {
 			t.Fatalf("Failed to get value: %v", err)
 		}
+
 		if !bytes.Equal(got, entry.value) {
 			t.Fatalf("Value mismatch: want=%v, got=%v", entry.value, got)
 		}
@@ -91,6 +97,7 @@ func testTableDatabase(t *testing.T, prefix string) {
 	// Test batch replayer
 	r := &testReplayer{}
 	batch.Replay(r)
+
 	for index, entry := range entries {
 		got := r.puts[index]
 		if !bytes.Equal(got, entry.key) {
@@ -100,20 +107,25 @@ func testTableDatabase(t *testing.T, prefix string) {
 
 	check := func(iter ethdb.Iterator, expCount, index int) {
 		count := 0
+
 		for iter.Next() {
 			key, value := iter.Key(), iter.Value()
 			if !bytes.Equal(key, entries[index].key) {
 				t.Fatalf("Key mismatch: want=%v, got=%v", entries[index].key, key)
 			}
+
 			if !bytes.Equal(value, entries[index].value) {
 				t.Fatalf("Value mismatch: want=%v, got=%v", entries[index].value, value)
 			}
+
 			index += 1
 			count++
 		}
+
 		if count != expCount {
 			t.Fatalf("Wrong number of elems, exp %d got %d", expCount, count)
 		}
+
 		iter.Release()
 	}
 	// Test iterators
@@ -125,4 +137,28 @@ func testTableDatabase(t *testing.T, prefix string) {
 	// Test iterators with prefix and start point
 	check(db.NewIterator([]byte{0xee}, nil), 0, 0)
 	check(db.NewIterator(nil, []byte{0x00}), 6, 0)
+
+	// Test range deletion
+	db.DeleteRange(nil, nil)
+	for _, entry := range entries {
+		_, err := db.Get(entry.key)
+		if err == nil {
+			t.Fatal("Unexpected item after deletion")
+		}
+	}
+	// Test range deletion by batch
+	batch = db.NewBatch()
+	for _, entry := range entries {
+		batch.Put(entry.key, entry.value)
+	}
+	batch.Write()
+	batch.Reset()
+	batch.DeleteRange(nil, nil)
+	batch.Write()
+	for _, entry := range entries {
+		_, err := db.Get(entry.key)
+		if err == nil {
+			t.Fatal("Unexpected item after deletion")
+		}
+	}
 }

@@ -67,7 +67,7 @@ func (c *twistPoint) Set(a *twistPoint) {
 	c.t.Set(a.t)
 }
 
-// IsOnCurve returns true iff c is on the curve where c must be in affine form.
+// IsOnCurve returns true iff c is on the curve and is in the correct subgroup, where c must be in affine form.
 func (c *twistPoint) IsOnCurve() bool {
 	pool := new(bnPool)
 	yy := newGFp2(pool).Square(c.y, pool)
@@ -80,8 +80,11 @@ func (c *twistPoint) IsOnCurve() bool {
 	if yy.x.Sign() != 0 || yy.y.Sign() != 0 {
 		return false
 	}
+	// Subgroup check: multiply the point by the group order and
+	// verify that it becomes the point at infinity.
 	cneg := newTwistPoint(pool)
 	cneg.Mul(c, Order, pool)
+
 	return cneg.z.IsZero()
 }
 
@@ -95,11 +98,11 @@ func (c *twistPoint) IsInfinity() bool {
 
 func (c *twistPoint) Add(a, b *twistPoint, pool *bnPool) {
 	// For additional comments, see the same function in curve.go.
-
 	if a.IsInfinity() {
 		c.Set(b)
 		return
 	}
+
 	if b.IsInfinity() {
 		c.Set(a)
 		return
@@ -125,17 +128,21 @@ func (c *twistPoint) Add(a, b *twistPoint, pool *bnPool) {
 	j := newGFp2(pool).Mul(h, i, pool)
 
 	t.Sub(s2, s1)
+
 	yEqual := t.IsZero()
 	if xEqual && yEqual {
 		c.Double(a, pool)
 		return
 	}
+
 	r := newGFp2(pool).Add(t, t)
 
 	v := newGFp2(pool).Mul(u1, i, pool)
 
 	t4 := newGFp2(pool).Square(r, pool)
+
 	t.Add(v, v)
+
 	t6 := newGFp2(pool).Sub(t4, j)
 	c.x.Sub(t6, t)
 
@@ -208,10 +215,12 @@ func (c *twistPoint) Double(a *twistPoint, pool *bnPool) {
 func (c *twistPoint) Mul(a *twistPoint, scalar *big.Int, pool *bnPool) *twistPoint {
 	sum := newTwistPoint(pool)
 	sum.SetInfinity()
+
 	t := newTwistPoint(pool)
 
 	for i := scalar.BitLen(); i >= 0; i-- {
 		t.Double(sum, pool)
+
 		if scalar.Bit(i) != 0 {
 			sum.Add(t, a, pool)
 		} else {
@@ -222,6 +231,7 @@ func (c *twistPoint) Mul(a *twistPoint, scalar *big.Int, pool *bnPool) *twistPoi
 	c.Set(sum)
 	sum.Put(pool)
 	t.Put(pool)
+
 	return c
 }
 
@@ -231,13 +241,16 @@ func (c *twistPoint) MakeAffine(pool *bnPool) *twistPoint {
 	if c.z.IsOne() {
 		return c
 	}
+
 	if c.IsInfinity() {
 		c.x.SetZero()
 		c.y.SetOne()
 		c.z.SetZero()
 		c.t.SetZero()
+
 		return c
 	}
+
 	zInv := newGFp2(pool).Invert(c.z, pool)
 	t := newGFp2(pool).Mul(c.y, zInv, pool)
 	zInv2 := newGFp2(pool).Square(zInv, pool)

@@ -27,39 +27,34 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maticnetwork/bor/common"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // TestPack tests the general pack/unpack tests in packing_test.go
 func TestPack(t *testing.T) {
+	t.Parallel()
 	for i, test := range packUnpackTests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
 			encb, err := hex.DecodeString(test.packed)
 			if err != nil {
 				t.Fatalf("invalid hex %s: %v", test.packed, err)
 			}
+
 			inDef := fmt.Sprintf(`[{ "name" : "method", "type": "function", "inputs": %s}]`, test.def)
 			inAbi, err := JSON(strings.NewReader(inDef))
+
 			if err != nil {
 				t.Fatalf("invalid ABI definition %s, %v", inDef, err)
 			}
+
 			var packed []byte
-			if reflect.TypeOf(test.unpacked).Kind() != reflect.Struct {
-				packed, err = inAbi.Pack("method", test.unpacked)
-			} else {
-				// if want is a struct we need to use the components.
-				elem := reflect.ValueOf(test.unpacked)
-				var values []interface{}
-				for i := 0; i < elem.NumField(); i++ {
-					field := elem.Field(i)
-					values = append(values, field.Interface())
-				}
-				packed, err = inAbi.Pack("method", values...)
-			}
+			packed, err = inAbi.Pack("method", test.unpacked)
 
 			if err != nil {
 				t.Fatalf("test %d (%v) failed: %v", i, test.def, err)
 			}
+
 			if !reflect.DeepEqual(packed[4:], encb) {
 				t.Errorf("test %d (%v) failed: expected %v, got %v", i, test.def, encb, packed[4:])
 			}
@@ -68,6 +63,7 @@ func TestPack(t *testing.T) {
 }
 
 func TestMethodPack(t *testing.T) {
+	t.Parallel()
 	abi, err := JSON(strings.NewReader(jsondata))
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +83,7 @@ func TestMethodPack(t *testing.T) {
 	}
 
 	var addrA, addrB = common.Address{1}, common.Address{2}
+
 	sig = abi.Methods["sliceAddress"].ID
 	sig = append(sig, common.LeftPadBytes([]byte{32}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
@@ -97,11 +94,13 @@ func TestMethodPack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(packed, sig) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
 
 	var addrC, addrD = common.Address{3}, common.Address{4}
+
 	sig = abi.Methods["sliceMultiAddress"].ID
 	sig = append(sig, common.LeftPadBytes([]byte{64}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{160}, 32)...)
@@ -116,6 +115,7 @@ func TestMethodPack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(packed, sig) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
@@ -143,10 +143,12 @@ func TestMethodPack(t *testing.T) {
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
 	sig = append(sig, common.LeftPadBytes(addrC[:], 32)...)
 	sig = append(sig, common.LeftPadBytes(addrD[:], 32)...)
+
 	packed, err = abi.Pack("nestedArray", a, []common.Address{addrC, addrD})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(packed, sig) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
@@ -159,10 +161,12 @@ func TestMethodPack(t *testing.T) {
 	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
+
 	packed, err = abi.Pack("nestedArray2", [2][]uint8{{1}, {1}})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(packed, sig) {
 		t.Errorf("expected %x got %x", sig, packed)
 	}
@@ -178,16 +182,24 @@ func TestMethodPack(t *testing.T) {
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{1}, 32)...)
 	sig = append(sig, common.LeftPadBytes([]byte{2}, 32)...)
+
 	packed, err = abi.Pack("nestedSlice", [][]uint8{{1, 2}, {1, 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if !bytes.Equal(packed, sig) {
 		t.Errorf("expected %x got %x", sig, packed)
+	}
+
+	// test that we can't pack a negative value for a parameter that is specified as a uint
+	if _, err := abi.Pack("send", big.NewInt(-1)); err == nil {
+		t.Fatal("expected error when trying to pack negative big.Int into uint256 value")
 	}
 }
 
 func TestPackNumber(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value  reflect.Value
 		packed []byte
