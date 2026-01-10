@@ -1,16 +1,23 @@
 package bor
 
-// Span represents a current bor span
-type Span struct {
-	ID         uint64 `json:"span_id" yaml:"span_id"`
-	StartBlock uint64 `json:"start_block" yaml:"start_block"`
-	EndBlock   uint64 `json:"end_block" yaml:"end_block"`
-}
+import (
+	"context"
 
-// HeimdallSpan represents span from heimdall APIs
-type HeimdallSpan struct {
-	Span
-	ValidatorSet      ValidatorSet `json:"validator_set" yaml:"validator_set"`
-	SelectedProducers []Validator  `json:"selected_producers" yaml:"selected_producers"`
-	ChainID           string       `json:"bor_chain_id" yaml:"bor_chain_id"`
+	borTypes "github.com/0xPolygon/heimdall-v2/x/bor/types"
+	stakeTypes "github.com/0xPolygon/heimdall-v2/x/stake/types"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/bor/valset"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/rpc"
+)
+
+//go:generate mockgen -destination=./span_mock.go -package=bor . Spanner
+type Spanner interface {
+	GetCurrentSpan(ctx context.Context, headerHash common.Hash, state *state.StateDB) (*borTypes.Span, error)
+	GetCurrentValidatorsByHash(ctx context.Context, headerHash common.Hash, blockNumber uint64) ([]*valset.Validator, error)
+	GetCurrentValidatorsByBlockNrOrHash(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, blockNumber uint64) ([]*valset.Validator, error)
+	CommitSpan(ctx context.Context, minimalSpan borTypes.Span, validators, producers []stakeTypes.MinimalVal, state vm.StateDB, header *types.Header, chainContext core.ChainContext) error
 }
