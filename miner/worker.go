@@ -99,6 +99,8 @@ var (
 	txHeapInitTimer = metrics.NewRegisteredTimer("worker/txheapinit", nil)
 	// commitTransactionsTimer measures time taken to execute transactions
 	commitTransactionsTimer = metrics.NewRegisteredTimer("worker/commitTransactions", nil)
+	// commitTimer measures total time for complete block building (tx execution + finalization + state root)
+	commitTimer = metrics.NewRegisteredTimer("worker/commit", nil)
 
 	// Cache hit/miss metrics for block production (miner path)
 	// These are the same meters used by the import path in blockchain.go
@@ -1767,9 +1769,12 @@ func createInterruptTimer(number uint64, actualTimestamp time.Time, interruptBlo
 // Note the assumption is held that the mutation is allowed to the passed env, do
 // the deep copy first.
 func (w *worker) commit(env *environment, interval func(), update bool, start time.Time) error {
-	// Report cache hit/miss metrics at the end of the commit cycle.
-	// This matches the behavior in blockchain.go for the import path.
+	// Track total block building time and report metrics at the end of the commit cycle.
 	defer func() {
+		// Update total commit timer (matches the "elapsed" time in log)
+		commitTimer.Update(time.Since(start))
+
+		// Report cache hit/miss metrics (matches behavior in blockchain.go for import path)
 		if metrics.Enabled() && env.prefetchReader != nil && env.processReader != nil {
 			// Report prefetch reader stats
 			prefetchStats := env.prefetchReader.GetStats()
