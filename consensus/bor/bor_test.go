@@ -945,3 +945,96 @@ func TestLateBlockTimestampFix(t *testing.T) {
 		require.GreaterOrEqual(t, header.ActualTime.Unix(), expectedMin)
 	})
 }
+
+func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
+	t.Parallel()
+
+	addr1 := common.HexToAddress("0x1")
+
+	t.Run("returns commit time duration", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 64},
+			Period: map[string]uint64{"0": 2},
+			// Set RioBlock high to avoid state sync path
+			RioBlock: big.NewInt(1000000),
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		// Create header for block 1
+		header := &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + borCfg.Period["0"],
+			GasLimit:   genesis.GasLimit,
+		}
+
+		// Create a state database from genesis
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		// Call FinalizeAndAssemble
+		block, _, commitTime, err := b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			nil,
+		)
+
+		// Verify the results
+		require.NoError(t, err)
+		require.NotNil(t, block)
+		require.GreaterOrEqual(t, commitTime, time.Duration(0), "commitTime should be non-negative")
+		require.Equal(t, header.Root, block.Root(), "block root should match header root")
+	})
+
+	t.Run("commit time increases with state size", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 64},
+			Period: map[string]uint64{"0": 2},
+			// Set RioBlock high to avoid state sync path
+			RioBlock: big.NewInt(1000000),
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		// Create a state database and add some data to it
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		// Add some state changes to increase commit time
+		testAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+		for i := 0; i < 100; i++ {
+			statedb.SetState(testAddr, common.BigToHash(big.NewInt(int64(i))), common.BigToHash(big.NewInt(int64(i*2))))
+		}
+		statedb.AddBalance(testAddr, uint256.NewInt(1000000), 0)
+
+		header := &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + borCfg.Period["0"],
+			GasLimit:   genesis.GasLimit,
+		}
+
+		// Call FinalizeAndAssemble and ensure commit time is measured
+		_, _, commitTime, err := b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			nil,
+		)
+
+		require.NoError(t, err)
+		require.Greater(t, commitTime, time.Duration(0), "commitTime should be positive with state changes")
+	})
+}
