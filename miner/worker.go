@@ -101,6 +101,8 @@ var (
 	commitTransactionsTimer = metrics.NewRegisteredTimer("worker/commitTransactions", nil)
 	// finalizeAndAssembleTimer measures time taken to finalize and assemble the block (state root calculation)
 	finalizeAndAssembleTimer = metrics.NewRegisteredTimer("worker/finalizeAndAssemble", nil)
+	// intermediateRootTimer measures time taken to calculate intermediate root
+	intermediateRootTimer = metrics.NewRegisteredTimer("worker/intermediateRoot", nil)
 	// commitTimer measures total time for complete block building (tx execution + finalization + state root)
 	commitTimer = metrics.NewRegisteredTimer("worker/commit", nil)
 
@@ -1619,7 +1621,7 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 	}
 
 	var block *types.Block
-	block, work.receipts, err = w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts)
+	block, work.receipts, _, err = w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts)
 
 	if err != nil {
 		return &newPayloadResult{err: err}
@@ -1807,11 +1809,13 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 
 		// Track time for FinalizeAndAssemble (state root calculation + block assembly)
 		finalizeStart := time.Now()
-		block, env.receipts, err = w.engine.FinalizeAndAssemble(w.chain, env.header, env.state, &types.Body{
+		var commitTime time.Duration
+		block, env.receipts, commitTime, err = w.engine.FinalizeAndAssemble(w.chain, env.header, env.state, &types.Body{
 			Transactions: env.txs,
 		}, env.receipts)
 		finalizeDuration := time.Since(finalizeStart)
 		finalizeAndAssembleTimer.Update(finalizeDuration)
+		intermediateRootTimer.Update(commitTime)
 
 		if err != nil {
 			return err
