@@ -99,6 +99,8 @@ var (
 	txHeapInitTimer = metrics.NewRegisteredTimer("worker/txheapinit", nil)
 	// commitTransactionsTimer measures time taken to execute transactions
 	commitTransactionsTimer = metrics.NewRegisteredTimer("worker/commitTransactions", nil)
+	// finalizeAndAssembleTimer measures time taken to finalize and assemble the block (state root calculation)
+	finalizeAndAssembleTimer = metrics.NewRegisteredTimer("worker/finalizeAndAssemble", nil)
 	// commitTimer measures total time for complete block building (tx execution + finalization + state root)
 	commitTimer = metrics.NewRegisteredTimer("worker/commit", nil)
 
@@ -1802,9 +1804,14 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		// Withdrawals are set to nil here, because this is only called in PoW.
 		var block *types.Block
 		var err error
+
+		// Track time for FinalizeAndAssemble (state root calculation + block assembly)
+		finalizeStart := time.Now()
 		block, env.receipts, err = w.engine.FinalizeAndAssemble(w.chain, env.header, env.state, &types.Body{
 			Transactions: env.txs,
 		}, env.receipts)
+		finalizeDuration := time.Since(finalizeStart)
+		finalizeAndAssembleTimer.Update(finalizeDuration)
 
 		if err != nil {
 			return err
@@ -1816,7 +1823,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 			feesInEther := new(big.Float).Quo(new(big.Float).SetInt(fees), big.NewFloat(params.Ether))
 			log.Info("Commit new sealing work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"txs", env.tcount, "gas", block.GasUsed(), "fees", feesInEther,
-				"elapsed", common.PrettyDuration(time.Since(start)))
+				"elapsed", common.PrettyDuration(time.Since(start)), "finalize", common.PrettyDuration(finalizeDuration))
 
 		case <-w.exitCh:
 			log.Info("Worker has exited")
