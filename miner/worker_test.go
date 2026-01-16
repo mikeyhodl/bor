@@ -1537,8 +1537,6 @@ func TestCommitMetrics(t *testing.T) {
 		ctrl        *gomock.Controller
 	)
 
-	chainConfig = params.BorUnittestChainConfig
-
 	engine, ctrl = getFakeBorFromConfig(t, chainConfig)
 	defer engine.Close()
 	defer ctrl.Finish()
