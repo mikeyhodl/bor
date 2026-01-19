@@ -22,6 +22,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/testutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -31,35 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/holiman/uint256"
 )
-
-// mockChainReader is a minimal implementation of consensus.ChainHeaderReader for testing
-type mockChainReader struct {
-	config *params.ChainConfig
-}
-
-func (m *mockChainReader) Config() *params.ChainConfig {
-	return m.config
-}
-
-func (m *mockChainReader) CurrentHeader() *types.Header {
-	return &types.Header{}
-}
-
-func (m *mockChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
-	return big.NewInt(0)
-}
 
 func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Parallel()
@@ -95,7 +67,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		// Create beacon engine
 		engine := New(ethash.NewFaker())
-		chain := &mockChainReader{config: &config}
+		chain := testutil.NewMockChainReader(&config)
 
 		// Create empty body
 		body := &types.Body{
@@ -182,7 +154,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		// Create beacon engine
 		engine := New(ethash.NewFaker())
-		chain := &mockChainReader{config: &config}
+		chain := testutil.NewMockChainReader(&config)
 
 		// Create empty body
 		body := &types.Body{
@@ -239,7 +211,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		// Create beacon engine with ethash as the ethone engine
 		engine := New(ethash.NewFaker())
-		chain := &mockChainReader{config: &config}
+		chain := testutil.NewMockChainReader(&config)
 
 		// Create empty body
 		body := &types.Body{
@@ -297,7 +269,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		// Create beacon engine
 		engine := New(ethash.NewFaker())
-		chain := &mockChainReader{config: &config}
+		chain := testutil.NewMockChainReader(&config)
 
 		// Create body with withdrawals before Shanghai activation
 		body := &types.Body{
@@ -345,7 +317,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		// Create beacon engine
 		engine := New(ethash.NewFaker())
-		chain := &mockChainReader{config: &config}
+		chain := testutil.NewMockChainReader(&config)
 
 		// Create body with nil withdrawals (should be initialized to empty slice)
 		body := &types.Body{

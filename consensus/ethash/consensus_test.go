@@ -28,6 +28,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/consensus/testutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -208,35 +209,6 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	})
 }
 
-// mockChainReader is a minimal implementation of consensus.ChainHeaderReader for testing
-type mockChainReader struct {
-	config *params.ChainConfig
-}
-
-func (m *mockChainReader) Config() *params.ChainConfig {
-	return m.config
-}
-
-func (m *mockChainReader) CurrentHeader() *types.Header {
-	return &types.Header{}
-}
-
-func (m *mockChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	return nil
-}
-
-func (m *mockChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
-	return big.NewInt(0)
-}
-
 func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Parallel()
 
@@ -269,7 +241,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 	// Create ethash engine and chain reader
 	engine := NewFaker()
-	chain := &mockChainReader{config: config}
+	chain := testutil.NewMockChainReader(config)
 
 	// Create empty body
 	body := &types.Body{

@@ -947,28 +947,43 @@ func TestLateBlockTimestampFix(t *testing.T) {
 	})
 }
 
+// setupFinalizeTest creates a test environment for FinalizeAndAssemble tests
+func setupFinalizeTest(t *testing.T, borCfg *params.BorConfig, addr common.Address) (*core.BlockChain, *Bor, *types.Header, *state.StateDB) {
+	sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr, VotingPower: 1}}}
+	chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr, uint64(time.Now().Unix()))
+
+	genesis := chain.HeaderChain().GetHeaderByNumber(0)
+	require.NotNil(t, genesis)
+
+	db := rawdb.NewMemoryDatabase()
+	statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+	require.NoError(t, err)
+
+	return chain, b, genesis, statedb
+}
+
+// createTestHeader creates a test header with the given parameters
+func createTestHeader(genesis *types.Header, blockNum uint64, period uint64) *types.Header {
+	return &types.Header{
+		Number:     big.NewInt(int64(blockNum)),
+		ParentHash: genesis.Hash(),
+		Time:       genesis.Time + period*blockNum,
+		GasLimit:   genesis.GasLimit,
+	}
+}
+
 func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Parallel()
 
 	addr1 := common.HexToAddress("0x1")
 
 	t.Run("commit time increases with state size", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
-			Sprint: map[string]uint64{"0": 64},
-			Period: map[string]uint64{"0": 2},
-			// Set RioBlock high to avoid state sync path
+			Sprint:   map[string]uint64{"0": 64},
+			Period:   map[string]uint64{"0": 2},
 			RioBlock: big.NewInt(1000000),
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
-
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		// Create a state database and add some data to it
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
 		// Add some state changes to increase commit time
 		testAddr := common.HexToAddress("0x1234567890123456789012345678901234567890")
@@ -977,12 +992,7 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 		}
 		statedb.AddBalance(testAddr, uint256.NewInt(1000000), 0)
 
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			ParentHash: genesis.Hash(),
-			Time:       genesis.Time + borCfg.Period["0"],
-			GasLimit:   genesis.GasLimit,
-		}
+		header := createTestHeader(genesis, 1, borCfg.Period["0"])
 
 		// Call FinalizeAndAssemble and ensure commit time is measured
 		_, _, commitTime, err := b.FinalizeAndAssemble(
@@ -998,29 +1008,16 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	})
 
 	t.Run("rejects withdrawals", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
 			Sprint: map[string]uint64{"0": 64},
 			Period: map[string]uint64{"0": 2},
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			ParentHash: genesis.Hash(),
-			Time:       genesis.Time + borCfg.Period["0"],
-			GasLimit:   genesis.GasLimit,
-		}
+		header := createTestHeader(genesis, 1, borCfg.Period["0"])
 
 		// Try to finalize with withdrawals - should fail
-		_, _, _, err = b.FinalizeAndAssemble(
+		_, _, _, err := b.FinalizeAndAssemble(
 			chain,
 			header,
 			statedb,
@@ -1037,31 +1034,18 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	})
 
 	t.Run("rejects withdrawals hash in header", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
 			Sprint: map[string]uint64{"0": 64},
 			Period: map[string]uint64{"0": 2},
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
-
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
 		withdrawalsHash := common.Hash{0x01}
-		header := &types.Header{
-			Number:          big.NewInt(1),
-			ParentHash:      genesis.Hash(),
-			Time:            genesis.Time + borCfg.Period["0"],
-			GasLimit:        genesis.GasLimit,
-			WithdrawalsHash: &withdrawalsHash,
-		}
+		header := createTestHeader(genesis, 1, borCfg.Period["0"])
+		header.WithdrawalsHash = &withdrawalsHash
 
 		// Try to finalize with withdrawals hash - should fail
-		_, _, _, err = b.FinalizeAndAssemble(
+		_, _, _, err := b.FinalizeAndAssemble(
 			chain,
 			header,
 			statedb,
@@ -1074,31 +1058,18 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	})
 
 	t.Run("rejects requests hash in header", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
 			Sprint: map[string]uint64{"0": 64},
 			Period: map[string]uint64{"0": 2},
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
-
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
 		requestsHash := common.Hash{0x02}
-		header := &types.Header{
-			Number:       big.NewInt(1),
-			ParentHash:   genesis.Hash(),
-			Time:         genesis.Time + borCfg.Period["0"],
-			GasLimit:     genesis.GasLimit,
-			RequestsHash: &requestsHash,
-		}
+		header := createTestHeader(genesis, 1, borCfg.Period["0"])
+		header.RequestsHash = &requestsHash
 
 		// Try to finalize with requests hash - should fail
-		_, _, _, err = b.FinalizeAndAssemble(
+		_, _, _, err := b.FinalizeAndAssemble(
 			chain,
 			header,
 			statedb,
@@ -1111,28 +1082,15 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	})
 
 	t.Run("non-sprint block skips span check", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
 			Sprint:   map[string]uint64{"0": 16}, // Sprint of 16 blocks
 			Period:   map[string]uint64{"0": 2},
 			RioBlock: big.NewInt(1000000),
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
-
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
 		// Block 15 is NOT a sprint start (15 % 16 != 0), so span check is skipped
-		header := &types.Header{
-			Number:     big.NewInt(15),
-			ParentHash: genesis.Hash(),
-			Time:       genesis.Time + borCfg.Period["0"]*15,
-			GasLimit:   genesis.GasLimit,
-		}
+		header := createTestHeader(genesis, 15, borCfg.Period["0"])
 
 		// Call FinalizeAndAssemble - should skip span check
 		_, _, commitTime, err := b.FinalizeAndAssemble(
@@ -1148,28 +1106,15 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	})
 
 	t.Run("madhugiri fork processes blocks", func(t *testing.T) {
-		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
 			Sprint:         map[string]uint64{"0": 64},
 			Period:         map[string]uint64{"0": 2},
 			MadhugiriBlock: big.NewInt(0), // Enable Madhugiri from start
 			RioBlock:       big.NewInt(1000000),
 		}
-		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+		chain, b, genesis, statedb := setupFinalizeTest(t, borCfg, addr1)
 
-		genesis := chain.HeaderChain().GetHeaderByNumber(0)
-		require.NotNil(t, genesis)
-
-		db := rawdb.NewMemoryDatabase()
-		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
-		require.NoError(t, err)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			ParentHash: genesis.Hash(),
-			Time:       genesis.Time + borCfg.Period["0"],
-			GasLimit:   genesis.GasLimit,
-		}
+		header := createTestHeader(genesis, 1, borCfg.Period["0"])
 
 		// Provide empty receipts (non-nil)
 		inputReceipts := []*types.Receipt{}
