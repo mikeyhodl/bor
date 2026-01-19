@@ -28,8 +28,14 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/holiman/uint256"
 )
 
 type diffTest struct {
@@ -200,4 +206,170 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 			x2(1000014, h)
 		}
 	})
+}
+
+// mockChainReader is a minimal implementation of consensus.ChainHeaderReader for testing
+type mockChainReader struct {
+	config *params.ChainConfig
+}
+
+func (m *mockChainReader) Config() *params.ChainConfig {
+	return m.config
+}
+
+func (m *mockChainReader) CurrentHeader() *types.Header {
+	return &types.Header{}
+}
+
+func (m *mockChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetHeaderByNumber(number uint64) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	return big.NewInt(0)
+}
+
+func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
+	t.Parallel()
+
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(params.Ether))
+		config  = params.TestChainConfig
+	)
+
+	// Create state database
+	db := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(db, triedb.HashDefaults)
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabase(tdb, nil))
+
+	// Fund the test account
+	statedb.SetBalance(address, uint256.MustFromBig(funds), tracing.BalanceChangeUnspecified)
+	statedb.SetNonce(address, 0, tracing.NonceChangeUnspecified)
+
+	// Create a header for the new block
+	header := &types.Header{
+		Number:     big.NewInt(1),
+		GasLimit:   5000000,
+		GasUsed:    0,
+		Time:       1000000,
+		Difficulty: big.NewInt(1),
+		Coinbase:   common.Address{},
+		ParentHash: common.Hash{},
+	}
+
+	// Create ethash engine and chain reader
+	engine := NewFaker()
+	chain := &mockChainReader{config: config}
+
+	// Create empty body
+	body := &types.Body{
+		Transactions: []*types.Transaction{},
+		Uncles:       []*types.Header{},
+		Withdrawals:  []*types.Withdrawal{},
+	}
+
+	// Call FinalizeAndAssemble
+	block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
+
+	// Verify no error occurred
+	if err != nil {
+		t.Fatalf("FinalizeAndAssemble failed: %v", err)
+	}
+
+	// Verify block was created
+	if block == nil {
+		t.Fatal("FinalizeAndAssemble returned nil block")
+	}
+
+	// Verify receipts were returned
+	if receipts == nil {
+		t.Fatal("FinalizeAndAssemble returned nil receipts")
+	}
+
+	// Verify commit time is non-negative (it should be >= 0)
+	if commitTime < 0 {
+		t.Fatalf("FinalizeAndAssemble returned negative commit time: %v", commitTime)
+	}
+
+	// Verify block has correct header values
+	if block.Number().Cmp(header.Number) != 0 {
+		t.Errorf("Block number mismatch: got %v, want %v", block.Number(), header.Number)
+	}
+
+	if block.GasLimit() != header.GasLimit {
+		t.Errorf("Block gas limit mismatch: got %v, want %v", block.GasLimit(), header.GasLimit)
+	}
+
+	// Verify state root was set (this is the key part that takes time)
+	if block.Root() == (common.Hash{}) {
+		t.Error("Block root hash is empty")
+	}
+
+	if header.Root == (common.Hash{}) {
+		t.Error("Header root hash is empty")
+	}
+
+	// Test with a transaction to verify commit time is measured with more state changes
+	statedb2, _ := state.New(types.EmptyRootHash, state.NewDatabase(tdb, nil))
+	statedb2.SetBalance(address, uint256.MustFromBig(funds), tracing.BalanceChangeUnspecified)
+	statedb2.SetNonce(address, 0, tracing.NonceChangeUnspecified)
+
+	// Add multiple storage entries to increase state size
+	testAddr := common.Address{0xaa}
+	statedb2.SetBalance(testAddr, uint256.NewInt(100), tracing.BalanceChangeUnspecified)
+	for i := 0; i < 100; i++ {
+		key := common.BigToHash(big.NewInt(int64(i)))
+		val := common.BigToHash(big.NewInt(int64(i * 2)))
+		statedb2.SetState(testAddr, key, val)
+	}
+
+	header2 := &types.Header{
+		Number:     big.NewInt(2),
+		GasLimit:   5000000,
+		GasUsed:    0,
+		Time:       1000001,
+		Difficulty: big.NewInt(1),
+		Coinbase:   common.Address{},
+		ParentHash: block.Hash(),
+	}
+
+	body2 := &types.Body{
+		Transactions: []*types.Transaction{},
+		Uncles:       []*types.Header{},
+		Withdrawals:  []*types.Withdrawal{},
+	}
+
+	block2, receipts2, commitTime2, err2 := engine.FinalizeAndAssemble(chain, header2, statedb2, body2, []*types.Receipt{})
+
+	if err2 != nil {
+		t.Fatalf("FinalizeAndAssemble with larger state failed: %v", err2)
+	}
+
+	if block2 == nil {
+		t.Fatal("FinalizeAndAssemble returned nil block for block with larger state")
+	}
+
+	if receipts2 == nil {
+		t.Fatal("FinalizeAndAssemble returned nil receipts for block with larger state")
+	}
+
+	// Commit time should be non-negative
+	if commitTime2 < 0 {
+		t.Fatalf("FinalizeAndAssemble returned negative commit time with larger state: %v", commitTime2)
+	}
+
+	// With more state changes, commit time should typically be positive (though not guaranteed)
+	// We just verify it's measured correctly
+	t.Logf("Commit time for empty state: %v", commitTime)
+	t.Logf("Commit time for state with 100 storage entries: %v", commitTime2)
 }
