@@ -1113,8 +1113,8 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Run("non-sprint block skips span check", func(t *testing.T) {
 		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 		borCfg := &params.BorConfig{
-			Sprint: map[string]uint64{"0": 16}, // Sprint of 16 blocks
-			Period: map[string]uint64{"0": 2},
+			Sprint:   map[string]uint64{"0": 16}, // Sprint of 16 blocks
+			Period:   map[string]uint64{"0": 2},
 			RioBlock: big.NewInt(1000000),
 		}
 		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
