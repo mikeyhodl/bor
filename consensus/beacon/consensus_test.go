@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/testutil"
 	"github.com/ethereum/go-ethereum/core/tracing"
@@ -29,30 +30,44 @@ import (
 	"github.com/holiman/uint256"
 )
 
+// createBeaconHeader creates a standard test header with the given parameters
+func createBeaconHeader(blockNum int64, gasLimit uint64, time uint64, difficulty *big.Int) *types.Header {
+	return &types.Header{
+		Number:     big.NewInt(blockNum),
+		GasLimit:   gasLimit,
+		GasUsed:    0,
+		Time:       time,
+		Difficulty: difficulty,
+		Coinbase:   common.Address{},
+		ParentHash: common.Hash{},
+	}
+}
+
+// createBeaconBody creates a standard empty body with optional withdrawals
+func createBeaconBody(withdrawals []*types.Withdrawal) *types.Body {
+	return &types.Body{
+		Transactions: []*types.Transaction{},
+		Uncles:       []*types.Header{},
+		Withdrawals:  withdrawals,
+	}
+}
+
+// setupBeaconEngine creates a beacon engine and chain reader with the given config
+func setupBeaconEngine(config *params.ChainConfig) (*Beacon, consensus.ChainHeaderReader) {
+	engine := New(ethash.NewFaker())
+	chain := testutil.NewMockChainReader(config)
+	return engine, chain
+}
+
 func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Parallel()
 
 	t.Run("PoS block without withdrawals", func(t *testing.T) {
 		config := *params.MergedTestChainConfig
 		_, _, _, statedb := testutil.SetupTestState(t)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			GasLimit:   5000000,
-			GasUsed:    0,
-			Time:       1000000,
-			Difficulty: common.Big0,
-			Coinbase:   common.Address{},
-			ParentHash: common.Hash{},
-		}
-
-		engine := New(ethash.NewFaker())
-		chain := testutil.NewMockChainReader(&config)
-		body := &types.Body{
-			Transactions: []*types.Transaction{},
-			Uncles:       []*types.Header{},
-			Withdrawals:  []*types.Withdrawal{},
-		}
+		engine, chain := setupBeaconEngine(&config)
+		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
+		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
 		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
@@ -72,23 +87,10 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 			statedb.SetState(testAddr, key, val)
 		}
 
-		header := &types.Header{
-			Number:     big.NewInt(2),
-			GasLimit:   5000000,
-			GasUsed:    0,
-			Time:       1000001,
-			Difficulty: common.Big0,
-			Coinbase:   common.Address{},
-			ParentHash: common.Hash{0x01},
-		}
-
-		engine := New(ethash.NewFaker())
-		chain := testutil.NewMockChainReader(&config)
-		body := &types.Body{
-			Transactions: []*types.Transaction{},
-			Uncles:       []*types.Header{},
-			Withdrawals:  []*types.Withdrawal{},
-		}
+		engine, chain := setupBeaconEngine(&config)
+		header := createBeaconHeader(2, 5000000, 1000001, common.Big0)
+		header.ParentHash = common.Hash{0x01}
+		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
 		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
@@ -98,24 +100,9 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Run("pre-merge block delegates to ethone", func(t *testing.T) {
 		config := *params.TestChainConfig
 		_, _, _, statedb := testutil.SetupTestState(t)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			GasLimit:   5000000,
-			GasUsed:    0,
-			Time:       1000000,
-			Difficulty: big.NewInt(1), // Non-zero difficulty indicates pre-merge
-			Coinbase:   common.Address{},
-			ParentHash: common.Hash{},
-		}
-
-		engine := New(ethash.NewFaker())
-		chain := testutil.NewMockChainReader(&config)
-		body := &types.Body{
-			Transactions: []*types.Transaction{},
-			Uncles:       []*types.Header{},
-			Withdrawals:  []*types.Withdrawal{},
-		}
+		engine, chain := setupBeaconEngine(&config)
+		header := createBeaconHeader(1, 5000000, 1000000, big.NewInt(1)) // Non-zero difficulty
+		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
 		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
@@ -126,24 +113,9 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 		config := *params.MergedTestChainConfig
 		config.ShanghaiBlock = big.NewInt(1000000)
 		_, _, _, statedb := testutil.SetupTestState(t)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			GasLimit:   5000000,
-			GasUsed:    0,
-			Time:       1000000,
-			Difficulty: common.Big0,
-			Coinbase:   common.Address{},
-			ParentHash: common.Hash{},
-		}
-
-		engine := New(ethash.NewFaker())
-		chain := testutil.NewMockChainReader(&config)
-		body := &types.Body{
-			Transactions: []*types.Transaction{},
-			Uncles:       []*types.Header{},
-			Withdrawals:  []*types.Withdrawal{{Validator: 1, Address: common.Address{0x01}, Amount: 100}},
-		}
+		engine, chain := setupBeaconEngine(&config)
+		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
+		body := createBeaconBody([]*types.Withdrawal{{Validator: 1, Address: common.Address{0x01}, Amount: 100}})
 
 		_, _, _, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
 
@@ -159,24 +131,9 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 		config := *params.MergedTestChainConfig
 		config.ShanghaiBlock = big.NewInt(0)
 		_, _, _, statedb := testutil.SetupTestState(t)
-
-		header := &types.Header{
-			Number:     big.NewInt(1),
-			GasLimit:   5000000,
-			GasUsed:    0,
-			Time:       1000000,
-			Difficulty: common.Big0,
-			Coinbase:   common.Address{},
-			ParentHash: common.Hash{},
-		}
-
-		engine := New(ethash.NewFaker())
-		chain := testutil.NewMockChainReader(&config)
-		body := &types.Body{
-			Transactions: []*types.Transaction{},
-			Uncles:       []*types.Header{},
-			Withdrawals:  nil, // This should be initialized to empty slice
-		}
+		engine, chain := setupBeaconEngine(&config)
+		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
+		body := createBeaconBody(nil) // nil should be initialized to empty slice
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
 		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
