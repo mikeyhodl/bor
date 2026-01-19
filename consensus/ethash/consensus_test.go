@@ -29,13 +29,9 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus/testutil"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/holiman/uint256"
 )
 
@@ -212,23 +208,9 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Parallel()
 
-	var (
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		address = crypto.PubkeyToAddress(key.PublicKey)
-		funds   = big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(params.Ether))
-		config  = params.TestChainConfig
-	)
+	config := params.TestChainConfig
+	_, _, _, statedb := testutil.SetupTestState(t)
 
-	// Create state database
-	db := rawdb.NewMemoryDatabase()
-	tdb := triedb.NewDatabase(db, triedb.HashDefaults)
-	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabase(tdb, nil))
-
-	// Fund the test account
-	statedb.SetBalance(address, uint256.MustFromBig(funds), tracing.BalanceChangeUnspecified)
-	statedb.SetNonce(address, 0, tracing.NonceChangeUnspecified)
-
-	// Create a header for the new block
 	header := &types.Header{
 		Number:     big.NewInt(1),
 		GasLimit:   5000000,
@@ -239,62 +221,19 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 		ParentHash: common.Hash{},
 	}
 
-	// Create ethash engine and chain reader
 	engine := NewFaker()
 	chain := testutil.NewMockChainReader(config)
-
-	// Create empty body
 	body := &types.Body{
 		Transactions: []*types.Transaction{},
 		Uncles:       []*types.Header{},
 		Withdrawals:  []*types.Withdrawal{},
 	}
 
-	// Call FinalizeAndAssemble
 	block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
+	testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
 
-	// Verify no error occurred
-	if err != nil {
-		t.Fatalf("FinalizeAndAssemble failed: %v", err)
-	}
-
-	// Verify block was created
-	if block == nil {
-		t.Fatal("FinalizeAndAssemble returned nil block")
-	}
-
-	// Verify receipts were returned
-	if receipts == nil {
-		t.Fatal("FinalizeAndAssemble returned nil receipts")
-	}
-
-	// Verify commit time is non-negative (it should be >= 0)
-	if commitTime < 0 {
-		t.Fatalf("FinalizeAndAssemble returned negative commit time: %v", commitTime)
-	}
-
-	// Verify block has correct header values
-	if block.Number().Cmp(header.Number) != 0 {
-		t.Errorf("Block number mismatch: got %v, want %v", block.Number(), header.Number)
-	}
-
-	if block.GasLimit() != header.GasLimit {
-		t.Errorf("Block gas limit mismatch: got %v, want %v", block.GasLimit(), header.GasLimit)
-	}
-
-	// Verify state root was set (this is the key part that takes time)
-	if block.Root() == (common.Hash{}) {
-		t.Error("Block root hash is empty")
-	}
-
-	if header.Root == (common.Hash{}) {
-		t.Error("Header root hash is empty")
-	}
-
-	// Test with a transaction to verify commit time is measured with more state changes
-	statedb2, _ := state.New(types.EmptyRootHash, state.NewDatabase(tdb, nil))
-	statedb2.SetBalance(address, uint256.MustFromBig(funds), tracing.BalanceChangeUnspecified)
-	statedb2.SetNonce(address, 0, tracing.NonceChangeUnspecified)
+	// Test with larger state
+	_, _, _, statedb2 := testutil.SetupTestState(t)
 
 	// Add multiple storage entries to increase state size
 	testAddr := common.Address{0xaa}
@@ -322,26 +261,8 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	}
 
 	block2, receipts2, commitTime2, err2 := engine.FinalizeAndAssemble(chain, header2, statedb2, body2, []*types.Receipt{})
+	testutil.VerifyFinalizeAndAssembleSuccess(t, block2, receipts2, commitTime2, err2, header2)
 
-	if err2 != nil {
-		t.Fatalf("FinalizeAndAssemble with larger state failed: %v", err2)
-	}
-
-	if block2 == nil {
-		t.Fatal("FinalizeAndAssemble returned nil block for block with larger state")
-	}
-
-	if receipts2 == nil {
-		t.Fatal("FinalizeAndAssemble returned nil receipts for block with larger state")
-	}
-
-	// Commit time should be non-negative
-	if commitTime2 < 0 {
-		t.Fatalf("FinalizeAndAssemble returned negative commit time with larger state: %v", commitTime2)
-	}
-
-	// With more state changes, commit time should typically be positive (though not guaranteed)
-	// We just verify it's measured correctly
 	t.Logf("Commit time for empty state: %v", commitTime)
 	t.Logf("Commit time for state with 100 storage entries: %v", commitTime2)
 }
