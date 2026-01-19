@@ -12,7 +12,7 @@ coverage:
         informational: false
 
 ignore:
-  - ".*/consensus/testutil/.*" # Test utilities shared across consensus tests
+  - "**/consensus/testutil/**"
 
 comment:
   layout: "reach,diff,flags,tree,files"
