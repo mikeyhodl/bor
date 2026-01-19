@@ -6161,4 +6161,25 @@ func TestStateAtWithReaders(t *testing.T) {
 			t.Logf("Process reader reads: %d, Prefetch reader reads: %d", processTotalReads, prefetchTotalReads)
 		}
 	})
+
+	// Test error handling - tests the first error path from ReadersWithCacheStats
+	// Note: The second error path from state.NewWithReader (lines 530-532 in blockchain_reader.go)
+	// is currently unreachable because NewWithReader never returns an error in the current
+	// implementation. It's kept for API compatibility and future-proofing.
+	t.Run("error from invalid root", func(t *testing.T) {
+		invalidRoot := common.HexToHash("0x1234567890123456789012345678901234567890123456789012345678901234")
+		statedb, prefetchReader, processReader, err := chain.StateAtWithReaders(invalidRoot)
+
+		if err == nil {
+			t.Fatal("expected error when using invalid root hash")
+		}
+
+		// Verify all return values are nil on error
+		if statedb != nil || prefetchReader != nil || processReader != nil {
+			t.Fatalf("expected all nil returns on error, got statedb=%v, prefetchReader=%v, processReader=%v",
+				statedb, prefetchReader, processReader)
+		}
+
+		t.Logf("Got expected error for invalid root: %v", err)
+	})
 }

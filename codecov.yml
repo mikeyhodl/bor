@@ -11,6 +11,9 @@ coverage:
         threshold: 0%
         informational: false
 
+ignore:
+  - "consensus/testutil/**/*"  # Test utilities shared across consensus tests
+
 comment:
   layout: "reach,diff,flags,tree,files"
   behavior: default
