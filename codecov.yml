@@ -11,9 +11,6 @@ coverage:
         threshold: 0%
         informational: false
 
-ignore:
-  - "**/consensus/testutil/**"
-
 comment:
   layout: "reach,diff,flags,tree,files"
   behavior: default

@@ -19,16 +19,98 @@ package beacon
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/testutil"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/holiman/uint256"
 )
+
+// setupTestState creates a test state database and funds the test account
+func setupTestState(t *testing.T) (common.Address, *big.Int, *triedb.Database, *state.StateDB) {
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	funds := big.NewInt(0).Mul(big.NewInt(1000), big.NewInt(params.Ether))
+
+	db := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(db, triedb.HashDefaults)
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabase(tdb, nil))
+
+	statedb.SetBalance(address, uint256.MustFromBig(funds), tracing.BalanceChangeUnspecified)
+	statedb.SetNonce(address, 0, tracing.NonceChangeUnspecified)
+
+	return address, funds, tdb, statedb
+}
+
+// verifyFinalizeAndAssembleSuccess checks common success conditions for FinalizeAndAssemble
+func verifyFinalizeAndAssembleSuccess(t *testing.T, block *types.Block, receipts []*types.Receipt, commitTime time.Duration, err error, header *types.Header) {
+	if err != nil {
+		t.Fatalf("FinalizeAndAssemble failed: %v", err)
+	}
+	if block == nil {
+		t.Fatal("FinalizeAndAssemble returned nil block")
+	}
+	if receipts == nil {
+		t.Fatal("FinalizeAndAssemble returned nil receipts")
+	}
+	if commitTime < 0 {
+		t.Fatalf("FinalizeAndAssemble returned negative commit time: %v", commitTime)
+	}
+	if block.Number().Cmp(header.Number) != 0 {
+		t.Errorf("Block number mismatch: got %v, want %v", block.Number(), header.Number)
+	}
+	if block.GasLimit() != header.GasLimit {
+		t.Errorf("Block gas limit mismatch: got %v, want %v", block.GasLimit(), header.GasLimit)
+	}
+	if block.Root() == (common.Hash{}) {
+		t.Error("Block root hash is empty")
+	}
+	if header.Root == (common.Hash{}) {
+		t.Error("Header root hash is empty")
+	}
+}
+
+// mockChainReader is a minimal implementation of consensus.ChainHeaderReader for testing
+type mockChainReader struct {
+	config *params.ChainConfig
+}
+
+// newMockChainReader creates a new mock chain reader with the given configuration
+func newMockChainReader(config *params.ChainConfig) consensus.ChainHeaderReader {
+	return &mockChainReader{config: config}
+}
+
+func (m *mockChainReader) Config() *params.ChainConfig {
+	return m.config
+}
+
+func (m *mockChainReader) CurrentHeader() *types.Header {
+	return &types.Header{}
+}
+
+func (m *mockChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetHeaderByNumber(number uint64) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+	return nil
+}
+
+func (m *mockChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	return big.NewInt(0)
+}
 
 // createBeaconHeader creates a standard test header with the given parameters
 func createBeaconHeader(blockNum int64, gasLimit uint64, time uint64, difficulty *big.Int) *types.Header {
@@ -55,7 +137,7 @@ func createBeaconBody(withdrawals []*types.Withdrawal) *types.Body {
 // setupBeaconEngine creates a beacon engine and chain reader with the given config
 func setupBeaconEngine(config *params.ChainConfig) (*Beacon, consensus.ChainHeaderReader) {
 	engine := New(ethash.NewFaker())
-	chain := testutil.NewMockChainReader(config)
+	chain := newMockChainReader(config)
 	return engine, chain
 }
 
@@ -64,19 +146,19 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 	t.Run("PoS block without withdrawals", func(t *testing.T) {
 		config := *params.MergedTestChainConfig
-		_, _, _, statedb := testutil.SetupTestState(t)
+		_, _, _, statedb := setupTestState(t)
 		engine, chain := setupBeaconEngine(&config)
 		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
 		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
-		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
+		verifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
 		t.Logf("Commit time for PoS block: %v", commitTime)
 	})
 
 	t.Run("PoS block with larger state", func(t *testing.T) {
 		config := *params.MergedTestChainConfig
-		_, _, _, statedb := testutil.SetupTestState(t)
+		_, _, _, statedb := setupTestState(t)
 
 		// Add multiple storage entries to increase state size
 		testAddr := common.Address{0xaa}
@@ -93,26 +175,26 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
-		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
+		verifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
 		t.Logf("Commit time for PoS block with 100 storage entries: %v", commitTime)
 	})
 
 	t.Run("pre-merge block delegates to ethone", func(t *testing.T) {
 		config := *params.TestChainConfig
-		_, _, _, statedb := testutil.SetupTestState(t)
+		_, _, _, statedb := setupTestState(t)
 		engine, chain := setupBeaconEngine(&config)
 		header := createBeaconHeader(1, 5000000, 1000000, big.NewInt(1)) // Non-zero difficulty
 		body := createBeaconBody([]*types.Withdrawal{})
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
-		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
+		verifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
 		t.Logf("Commit time for pre-merge block (delegated to ethash): %v", commitTime)
 	})
 
 	t.Run("PoS block with withdrawals before Shanghai should fail", func(t *testing.T) {
 		config := *params.MergedTestChainConfig
 		config.ShanghaiBlock = big.NewInt(1000000)
-		_, _, _, statedb := testutil.SetupTestState(t)
+		_, _, _, statedb := setupTestState(t)
 		engine, chain := setupBeaconEngine(&config)
 		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
 		body := createBeaconBody([]*types.Withdrawal{{Validator: 1, Address: common.Address{0x01}, Amount: 100}})
@@ -130,13 +212,13 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 	t.Run("PoS block after Shanghai with nil withdrawals initializes empty slice", func(t *testing.T) {
 		config := *params.MergedTestChainConfig
 		config.ShanghaiBlock = big.NewInt(0)
-		_, _, _, statedb := testutil.SetupTestState(t)
+		_, _, _, statedb := setupTestState(t)
 		engine, chain := setupBeaconEngine(&config)
 		header := createBeaconHeader(1, 5000000, 1000000, common.Big0)
 		body := createBeaconBody(nil) // nil should be initialized to empty slice
 
 		block, receipts, commitTime, err := engine.FinalizeAndAssemble(chain, header, statedb, body, []*types.Receipt{})
-		testutil.VerifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
+		verifyFinalizeAndAssembleSuccess(t, block, receipts, commitTime, err, header)
 
 		// Verify withdrawals were initialized to empty slice (not nil)
 		if body.Withdrawals == nil {
