@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil" //nolint:typecheck
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/bor/valset"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -994,5 +995,197 @@ func TestFinalizeAndAssembleReturnsCommitTime(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Greater(t, commitTime, time.Duration(0), "commitTime should be positive with state changes")
+	})
+
+	t.Run("rejects withdrawals", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 64},
+			Period: map[string]uint64{"0": 2},
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		header := &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + borCfg.Period["0"],
+			GasLimit:   genesis.GasLimit,
+		}
+
+		// Try to finalize with withdrawals - should fail
+		_, _, _, err = b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{
+				Transactions: nil,
+				Uncles:       nil,
+				Withdrawals:  []*types.Withdrawal{{Validator: 1, Address: addr1, Amount: 100}},
+			},
+			nil,
+		)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, consensus.ErrUnexpectedWithdrawals)
+	})
+
+	t.Run("rejects withdrawals hash in header", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 64},
+			Period: map[string]uint64{"0": 2},
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		withdrawalsHash := common.Hash{0x01}
+		header := &types.Header{
+			Number:          big.NewInt(1),
+			ParentHash:      genesis.Hash(),
+			Time:            genesis.Time + borCfg.Period["0"],
+			GasLimit:        genesis.GasLimit,
+			WithdrawalsHash: &withdrawalsHash,
+		}
+
+		// Try to finalize with withdrawals hash - should fail
+		_, _, _, err = b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			nil,
+		)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, consensus.ErrUnexpectedWithdrawals)
+	})
+
+	t.Run("rejects requests hash in header", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 64},
+			Period: map[string]uint64{"0": 2},
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		requestsHash := common.Hash{0x02}
+		header := &types.Header{
+			Number:       big.NewInt(1),
+			ParentHash:   genesis.Hash(),
+			Time:         genesis.Time + borCfg.Period["0"],
+			GasLimit:     genesis.GasLimit,
+			RequestsHash: &requestsHash,
+		}
+
+		// Try to finalize with requests hash - should fail
+		_, _, _, err = b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			nil,
+		)
+
+		require.Error(t, err)
+		require.ErrorIs(t, err, consensus.ErrUnexpectedRequests)
+	})
+
+	t.Run("non-sprint block skips span check", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint: map[string]uint64{"0": 16}, // Sprint of 16 blocks
+			Period: map[string]uint64{"0": 2},
+			RioBlock: big.NewInt(1000000),
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		// Block 15 is NOT a sprint start (15 % 16 != 0), so span check is skipped
+		header := &types.Header{
+			Number:     big.NewInt(15),
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + borCfg.Period["0"]*15,
+			GasLimit:   genesis.GasLimit,
+		}
+
+		// Call FinalizeAndAssemble - should skip span check
+		_, _, commitTime, err := b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			nil,
+		)
+
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, commitTime, time.Duration(0))
+	})
+
+	t.Run("madhugiri fork processes blocks", func(t *testing.T) {
+		sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+		borCfg := &params.BorConfig{
+			Sprint:         map[string]uint64{"0": 64},
+			Period:         map[string]uint64{"0": 2},
+			MadhugiriBlock: big.NewInt(0), // Enable Madhugiri from start
+			RioBlock:       big.NewInt(1000000),
+		}
+		chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix()))
+
+		genesis := chain.HeaderChain().GetHeaderByNumber(0)
+		require.NotNil(t, genesis)
+
+		db := rawdb.NewMemoryDatabase()
+		statedb, err := state.New(genesis.Root, state.NewDatabase(triedb.NewDatabase(db, triedb.HashDefaults), nil))
+		require.NoError(t, err)
+
+		header := &types.Header{
+			Number:     big.NewInt(1),
+			ParentHash: genesis.Hash(),
+			Time:       genesis.Time + borCfg.Period["0"],
+			GasLimit:   genesis.GasLimit,
+		}
+
+		// Provide empty receipts (non-nil)
+		inputReceipts := []*types.Receipt{}
+
+		// Call FinalizeAndAssemble with Madhugiri enabled
+		block, outputReceipts, commitTime, err := b.FinalizeAndAssemble(
+			chain,
+			header,
+			statedb,
+			&types.Body{Transactions: nil, Uncles: nil},
+			inputReceipts,
+		)
+
+		require.NoError(t, err)
+		require.NotNil(t, block)
+		require.NotNil(t, outputReceipts)
+		require.GreaterOrEqual(t, commitTime, time.Duration(0))
 	})
 }
