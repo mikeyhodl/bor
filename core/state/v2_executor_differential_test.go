@@ -290,7 +290,7 @@ func exScenarios() []exScenario {
 
 		// ---- Balance transfer chain: Alice → Bob → Carol ----
 		{
-			name: "balance_transfer_chain",
+			name:  "balance_transfer_chain",
 			setup: []pdbOp{opAddBalance{alice, u(100)}},
 			txs: []txScript{
 				{sender: alice, ops: []pdbOp{
@@ -533,7 +533,6 @@ func manyIndependentProbes(n int) []probe {
 
 func TestV2ExecutorDifferential(t *testing.T) {
 	for _, sc := range exScenarios() {
-		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
 			runExecutorDifferential(t, sc)
 		})

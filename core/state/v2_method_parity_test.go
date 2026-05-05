@@ -35,11 +35,11 @@ import (
 type pdbExemptCategory string
 
 const (
-	catV1Internals     pdbExemptCategory = "V1 BlockSTM internals"
-	catV2SettleHelper  pdbExemptCategory = "V2 settle helper (called on the underlying StateDB by SettleTo)"
-	catLifecycle       pdbExemptCategory = "block lifecycle (commit / prefetcher / copy)"
-	catLowLevel        pdbExemptCategory = "low-level / utility"
-	catDebug           pdbExemptCategory = "debug / introspection"
+	catV1Internals    pdbExemptCategory = "V1 BlockSTM internals"
+	catV2SettleHelper pdbExemptCategory = "V2 settle helper (called on the underlying StateDB by SettleTo)"
+	catLifecycle      pdbExemptCategory = "block lifecycle (commit / prefetcher / copy)"
+	catLowLevel       pdbExemptCategory = "low-level / utility"
+	catDebug          pdbExemptCategory = "debug / introspection"
 )
 
 var pdbExemptMethods = map[string]pdbExemptCategory{

@@ -254,8 +254,8 @@ type trieReader struct {
 	// or Verkle-tree is not safe for concurrent read.
 	mainTrie Trie
 
-	subRoots   sync.Map // common.Address → common.Hash (storage roots)
-	subTries   sync.Map // common.Address → Trie (storage tries)
+	subRoots          sync.Map   // common.Address → common.Hash (storage roots)
+	subTries          sync.Map   // common.Address → Trie (storage tries)
 	lock              sync.Mutex // Lock for protecting concurrent read
 	accountCache      sync.Map   // addr → *types.StateAccount (concurrent-safe cache)
 	storageCache      sync.Map   // addrSlot → common.Hash (concurrent-safe cache)

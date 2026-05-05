@@ -19,9 +19,9 @@ import (
 //   - 1000 unique keys: ~0.07%
 //   - 5000 unique keys: ~5%
 const (
-	bloomBits  = 1 << 15             // 32768 bits
-	bloomWords = bloomBits / 64      // 512 uint64s = 4KB
-	bloomMask  = bloomBits - 1       // bitmask for modulo
+	bloomBits  = 1 << 15        // 32768 bits
+	bloomWords = bloomBits / 64 // 512 uint64s = 4KB
+	bloomMask  = bloomBits - 1  // bitmask for modulo
 )
 
 type writeBloom struct {

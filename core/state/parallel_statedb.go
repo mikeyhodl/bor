@@ -61,18 +61,18 @@ type FeeData struct {
 type TransferLogFn func(db *StateDB, sender, recipient common.Address, amount, input1, input2, output1, output2 *big.Int)
 
 type TransferRecord struct {
-	Sender       common.Address
-	Recipient    common.Address
-	Amount       uint256.Int
-	LogIdx       int // position in the logs slice where this transfer log should be inserted
+	Sender        common.Address
+	Recipient     common.Address
+	Amount        uint256.Int
+	LogIdx        int // position in the logs slice where this transfer log should be inserted
 	BalanceOpsIdx int // index in BalanceOps where this transfer's SubBalance appears
 }
 
 type ParallelStateDB struct {
 	TxIndex     int
-	Incarnation int              // bumped on re-execution for validation
-	base        *SafeBase        // thread-safe pre-block state reads
-	rawBase     *StateDB         // raw base for PointCache/Witness only
+	Incarnation int                      // bumped on re-execution for validation
+	base        *SafeBase                // thread-safe pre-block state reads
+	rawBase     *StateDB                 // raw base for PointCache/Witness only
 	store       *blockstm.MVStore        // shared versioned values
 	bals        *blockstm.MVBalanceStore // shared balance deltas
 
@@ -108,13 +108,13 @@ type ParallelStateDB struct {
 	nextRevisionId int
 
 	// Read/write tracking for BlockSTM validation
-	trackReads bool
-	StoreReads []StoreReadDesc
-	BalReads   []BalReadDesc
-	WriteKeys  []blockstm.Key
-	BalAddrs     []common.Address
-	balAddrSet   map[common.Address]bool // dedup for BalReads
-	balWriteSet  map[common.Address]bool // dedup for BalAddrs (O(1) writes)
+	trackReads  bool
+	StoreReads  []StoreReadDesc
+	BalReads    []BalReadDesc
+	WriteKeys   []blockstm.Key
+	BalAddrs    []common.Address
+	balAddrSet  map[common.Address]bool // dedup for BalReads
+	balWriteSet map[common.Address]bool // dedup for BalAddrs (O(1) writes)
 
 	// Per-key pipelining: block until a writer tx has produced a value.
 	// WaitForTx waits only until the writer's execution has flushed to MVStore;
@@ -160,7 +160,7 @@ type ParallelStateDB struct {
 	// Execution result (captured from ApplyMessage for receipt building)
 	UsedGas    uint64
 	ExecFailed bool
-	Panicked   bool  // true if execution panicked (always fails validation)
+	Panicked   bool // true if execution panicked (always fails validation)
 	// ExecErr is set when ApplyMessage returns a consensus-level error
 	// (e.g. invalid nonce, insufficient upfront gas, intrinsic gas underflow,
 	// blob fork-gating violation). Such a tx must NOT be settled; the caller
@@ -540,13 +540,6 @@ func (s *ParallelStateDB) priorDestructedAt(addr common.Address) int {
 	return idx
 }
 
-// priorDestructed is a convenience wrapper that drops the txIdx and just
-// returns whether some prior tx destructed addr. Kept for code paths that
-// don't need ordering information.
-func (s *ParallelStateDB) priorDestructed(addr common.Address) bool {
-	return s.priorDestructedAt(addr) >= 0
-}
-
 // priorCreatedAt returns the tx index of the most recent CREATE/CREATE2/
 // SetCode-driven CreateAccount on addr, or -1 if no such write exists.
 // Used together with priorDestructedAt to determine whether a prior
@@ -710,7 +703,9 @@ func (s *ParallelStateDB) GetNonce(addr common.Address) uint64 {
 func (s *ParallelStateDB) SetNonce(addr common.Address, nonce uint64, reason tracing.NonceChangeReason) {
 	prev, had := s.localNonces[addr]
 	var flags uint8
-	if had { flags = 1 }
+	if had {
+		flags = 1
+	}
 	s.journalEntries = append(s.journalEntries, parallelJournalEntry{kind: jkNonce, flags: flags, addr: addr, prevU: prev})
 	s.localNonces[addr] = nonce
 	nonceKey := blockstm.NewSubpathKey(addr, NoncePath)
@@ -809,7 +804,9 @@ func (s *ParallelStateDB) SetCode(addr common.Address, code []byte, reason traci
 	prev := s.GetCode(addr)
 	_, hadCode := s.localCode[addr]
 	var flags uint8
-	if hadCode { flags = 1 }
+	if hadCode {
+		flags = 1
+	}
 	s.journalEntries = append(s.journalEntries, parallelJournalEntry{kind: jkCode, flags: flags, addr: addr, code: prev})
 	s.localCode[addr] = code
 	codeKey := blockstm.NewSubpathKey(addr, CodePath)
@@ -899,7 +896,9 @@ func (s *ParallelStateDB) SetState(addr common.Address, key, value common.Hash) 
 	prev := s.GetState(addr, key)
 	_, had := s.localStorage[addr][key]
 	var flags uint8
-	if had { flags = 1 }
+	if had {
+		flags = 1
+	}
 	s.journalEntries = append(s.journalEntries, parallelJournalEntry{kind: jkStorage, flags: flags, addr: addr, key: key, prev: prev})
 	if s.localStorage[addr] == nil {
 		s.localStorage[addr] = make(map[common.Hash]common.Hash)
@@ -1144,4 +1143,3 @@ func (s *ParallelStateDB) RecordTransfer(sender, recipient common.Address, amoun
 // settleBalanceOpsAndLogs, tryEmitTransferAt, emitTransferLog,
 // settleAccountSet, applyFeeData, GetLogs) live in
 // parallel_statedb_settle.go.
-

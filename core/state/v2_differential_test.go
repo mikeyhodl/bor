@@ -169,11 +169,6 @@ type opAddRefund struct{ gas uint64 }
 func (o opAddRefund) applyTo(s sdbIface) { s.AddRefund(o.gas) }
 func (o opAddRefund) name() string       { return "AddRefund" }
 
-type opSubRefund struct{ gas uint64 }
-
-func (o opSubRefund) applyTo(s sdbIface) { s.SubRefund(o.gas) }
-func (o opSubRefund) name() string       { return "SubRefund" }
-
 type opTransient struct {
 	addr      common.Address
 	slot, val common.Hash
@@ -183,11 +178,6 @@ func (o opTransient) applyTo(s sdbIface) {
 	s.SetTransientState(o.addr, o.slot, o.val)
 }
 func (o opTransient) name() string { return "SetTransientState" }
-
-type opWarmAddress struct{ addr common.Address }
-
-func (o opWarmAddress) applyTo(s sdbIface) { s.AddAddressToAccessList(o.addr) }
-func (o opWarmAddress) name() string       { return "AddAddressToAccessList" }
 
 // opGetBalance is a read-producing op — exercises the read-tracking path
 // and makes subsequent writer conflicts detectable by V2 validation.
@@ -463,9 +453,9 @@ func runDifferential(t *testing.T, sc scenario) {
 // Scenarios
 // ---------------------------------------------------------------------------
 
-func u(n uint64) *uint256.Int      { return uint256.NewInt(n) }
-func h(n uint64) common.Hash       { return common.BigToHash(uint256.NewInt(n).ToBig()) }
-func a(b byte) common.Address      { return common.Address{b} }
+func u(n uint64) *uint256.Int { return uint256.NewInt(n) }
+func h(n uint64) common.Hash  { return common.BigToHash(uint256.NewInt(n).ToBig()) }
+func a(b byte) common.Address { return common.Address{b} }
 
 func diffScenarios() []scenario {
 	alice := a(1)
@@ -499,7 +489,7 @@ func diffScenarios() []scenario {
 			probes: []probe{{kind: "balance", addr: alice}},
 		},
 		{
-			name: "transfer_between_addrs",
+			name:  "transfer_between_addrs",
 			setup: []pdbOp{opAddBalance{alice, u(100)}},
 			ops: []pdbOp{
 				opSubBalance{alice, u(30)},
@@ -563,7 +553,7 @@ func diffScenarios() []scenario {
 			probes: []probe{{kind: "storage", addr: alice, slot: h(1)}},
 		},
 		{
-			name: "sstore_multi_slots",
+			name:  "sstore_multi_slots",
 			setup: []pdbOp{opAddBalance{alice, u(1)}},
 			ops: []pdbOp{
 				opSetState{alice, h(1), h(0x11)},
@@ -666,7 +656,7 @@ func diffScenarios() []scenario {
 			probes: []probe{{kind: "codehash", addr: alice}, {kind: "code", addr: alice}},
 		},
 		{
-			name: "revert_selfdestruct_preserves_balance",
+			name:  "revert_selfdestruct_preserves_balance",
 			setup: []pdbOp{opAddBalance{alice, u(42)}},
 			ops: []pdbOp{
 				opRevertAfter{inner: []pdbOp{opSelfDestruct{alice}}},
@@ -711,7 +701,7 @@ func diffScenarios() []scenario {
 
 		// ---- Transient storage (doesn't affect root; verify no collateral damage) ----
 		{
-			name: "transient_storage_isolated",
+			name:  "transient_storage_isolated",
 			setup: []pdbOp{opAddBalance{alice, u(1)}},
 			ops: []pdbOp{
 				opTransient{alice, h(1), h(0xaa)},
@@ -771,7 +761,6 @@ func diffScenarios() []scenario {
 
 func TestV2Differential(t *testing.T) {
 	for _, sc := range diffScenarios() {
-		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
 			runDifferential(t, sc)
 		})

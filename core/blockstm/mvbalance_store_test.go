@@ -16,8 +16,8 @@ func mvBalAddr(b byte) common.Address { return common.Address{b} }
 // timeAfter returns a channel that fires after n seconds. Used to put a
 // deadline on lock-acquisition tests so a deadlock surfaces as a test
 // failure rather than a hang.
-func timeAfter(seconds time.Duration) <-chan time.Time {
-	return time.After(seconds * time.Second)
+func timeAfter(seconds int) <-chan time.Time {
+	return time.After(time.Duration(seconds) * time.Second)
 }
 
 // TestMVBalanceStore_WriteReadDelta covers basic accumulation: two writes

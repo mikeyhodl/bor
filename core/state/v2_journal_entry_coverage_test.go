@@ -36,18 +36,18 @@ import (
 // kind here is purely a label for failure messages — the real link
 // is the existence of a matching revert in parallel_statedb_journal.go.
 var journalEntryToParallelKind = map[string]string{
-	"createObjectChange":          "jkCreate",
-	"createContractChange":        "jkCreate", // CreateContract reuses CreateAccount's journal entry
-	"selfDestructChange":          "jkDestruct",
-	"balanceChange":               "jkBalance",
-	"nonceChange":                 "jkNonce",
-	"codeChange":                  "jkCode",
-	"storageChange":               "jkStorage",
-	"transientStorageChange":      "jkTransient",
-	"refundChange":                "jkRefund",
-	"addLogChange":                "jkLog",
-	"accessListAddAccountChange":  "jkAccessAddr",
-	"accessListAddSlotChange":     "jkAccessSlot",
+	"createObjectChange":         "jkCreate",
+	"createContractChange":       "jkCreate", // CreateContract reuses CreateAccount's journal entry
+	"selfDestructChange":         "jkDestruct",
+	"balanceChange":              "jkBalance",
+	"nonceChange":                "jkNonce",
+	"codeChange":                 "jkCode",
+	"storageChange":              "jkStorage",
+	"transientStorageChange":     "jkTransient",
+	"refundChange":               "jkRefund",
+	"addLogChange":               "jkLog",
+	"accessListAddAccountChange": "jkAccessAddr",
+	"accessListAddSlotChange":    "jkAccessSlot",
 }
 
 // journalEntryImplicitInV2 lists serial journalEntry types whose effect

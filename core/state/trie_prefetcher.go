@@ -266,7 +266,7 @@ type subfetcher struct {
 	root  common.Hash    // Root hash of the trie to prefetch
 	addr  common.Address // Address of the account that the trie belongs to
 	trie  Trie           // Trie being populated with nodes
-	ioSem chan struct{}   // Shared semaphore limiting concurrent trie I/O
+	ioSem chan struct{}  // Shared semaphore limiting concurrent trie I/O
 
 	tasks []*subfetcherTask // Items queued up for retrieval
 	lock  sync.Mutex        // Lock protecting the task queue

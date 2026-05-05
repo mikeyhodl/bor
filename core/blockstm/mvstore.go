@@ -44,7 +44,7 @@ type mvStoreShard struct {
 
 type MVStore struct {
 	shards    [mvStoreShards]mvStoreShard
-	bloom     writeBloom // lock-free bloom filter for fast read misses
+	bloom     writeBloom   // lock-free bloom filter for fast read misses
 	Estimates atomic.Int64 // count of estimate-wait spins (diagnostic)
 }
 
@@ -183,4 +183,3 @@ func (s *MVStore) CleanupEstimate(txIdx int, keys []Key) {
 		sh.mu.Unlock()
 	}
 }
-

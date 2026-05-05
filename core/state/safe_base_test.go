@@ -146,4 +146,3 @@ func TestSafeBase_GetStorageRoot(t *testing.T) {
 		t.Fatalf("GetStorageRoot not stable: %s vs %s", r1.Hex(), r2.Hex())
 	}
 }
-

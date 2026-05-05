@@ -98,7 +98,6 @@ func testStaleBalanceReadCaught(t *testing.T) {
 	t.Logf("validation correctly caught stale balance read: %s", res.FailKey)
 }
 
-
 // testExecutorBalanceValidation runs the full BlockSTM executor with two txs
 // from the same sender where the second tx cannot afford the transfer after
 // the first. Verifies end-to-end correctness regardless of execution order.
@@ -207,7 +206,7 @@ func testExecutorBalanceValidation(t *testing.T) {
 	gasPerTx := new(uint256.Int).Mul(uint256.NewInt(21000), uint256.NewInt(875000001))
 	expectedSender := new(uint256.Int).Set(oneEth)
 	expectedSender.Sub(expectedSender, new(uint256.Int).Mul(uint256.NewInt(9), uint256.NewInt(1e17))) // - 0.9 ETH
-	expectedSender.Sub(expectedSender, gasPerTx) // - gas(tx0) only
+	expectedSender.Sub(expectedSender, gasPerTx)                                                      // - gas(tx0) only
 
 	if senderFinal.Cmp(expectedSender) != 0 {
 		t.Errorf("sender balance = %s, expected %s",

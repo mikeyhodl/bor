@@ -271,7 +271,6 @@ func runV1Parallel(t *testing.T, sc v1Scenario, chainConfig *params.ChainConfig)
 func TestV1ParallelStateProcessor_Differential(t *testing.T) {
 	chainConfig := params.TestChainConfig
 	for _, sc := range v1Scenarios() {
-		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
 			serialRoot := runV1Serial(t, sc, chainConfig)
 			v1Root := runV1Parallel(t, sc, chainConfig)

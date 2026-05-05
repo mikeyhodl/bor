@@ -15,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/triedb"
 )
 
-
 // newTestPDB creates a ParallelStateDB backed by an empty in-memory state.
 func newTestPDB(t *testing.T, txIdx int) (*ParallelStateDB, *blockstm.MVStore, *blockstm.MVBalanceStore) {
 	t.Helper()
@@ -1409,6 +1408,7 @@ func TestPDB_TryEmitTransferAt_NoIntermediateLogs(t *testing.T) {
 		t.Fatalf("logIdx with LogIdx=0: got %d, want 0 (no intermediate emission)", lIdx)
 	}
 }
+
 // ---------------------------------------------------------------------------
 // Exist — all three return paths
 // ---------------------------------------------------------------------------

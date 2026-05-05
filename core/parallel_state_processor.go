@@ -327,7 +327,7 @@ func (p *ParallelStateProcessor) maybeRerunWithoutFeeDelay(tasks []blockstm.Exec
 		return nil, false
 	}
 	*shouldDelayFeeCal = false
-	*statedb = *backupStateDB
+	*statedb = *backupStateDB //nolint:govet // single-threaded V1 rerun path; backup copy is a snapshot, not aliased
 	*allLogs = []*types.Log{}
 	*receipts = types.Receipts{}
 	*usedGas = new(uint64)
@@ -614,9 +614,9 @@ type v2Env struct {
 	vmConfig    vm.Config
 	chainConfig *params.ChainConfig
 	gasLimit    uint64
-	jumpDests  vm.JumpDestCache
-	safeBase   *state.SafeBase // shared across all workers (with read cache)
-	recycleCh  chan *state.ParallelStateDB // pool of reusable PDBs
+	jumpDests   vm.JumpDestCache
+	safeBase    *state.SafeBase             // shared across all workers (with read cache)
+	recycleCh   chan *state.ParallelStateDB // pool of reusable PDBs
 }
 
 func (e *v2Env) BaseNonce(addr common.Address) uint64 {
@@ -643,7 +643,6 @@ func (e *v2Env) Recycle(st blockstm.V2TxState) {
 func (e *v2Env) Execute(task blockstm.V2Task, workerID int, incarnation int,
 	senderNonces map[common.Address]uint64,
 	coinbase common.Address, waitForTx func(int), waitForFinal func(int), deferWrites bool) blockstm.V2TxState {
-
 	t := task.(*v2Task)
 	pdb := e.preparePDB(t, incarnation, senderNonces, coinbase, waitForTx, waitForFinal, deferWrites)
 

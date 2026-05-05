@@ -101,11 +101,11 @@ const (
 // fuzzTx is one tx in a decoded scenario.
 type fuzzTx struct {
 	kind         fuzzTxKind
-	senderIdx    int     // index into fuzzKeys
-	recipientIdx int     // for kindTransferToSender
-	freshNonce   byte    // for kindTransferToFresh — derived from input bytes for determinism
-	valueGwei    uint16  // small value so balances don't run out
-	createKind   uint8   // for kindContractCreate — selects which canned bytecode
+	senderIdx    int    // index into fuzzKeys
+	recipientIdx int    // for kindTransferToSender
+	freshNonce   byte   // for kindTransferToFresh — derived from input bytes for determinism
+	valueGwei    uint16 // small value so balances don't run out
+	createKind   uint8  // for kindContractCreate — selects which canned bytecode
 }
 
 // canned contract bytecodes used by kindContractCreate. Each one is
@@ -126,7 +126,7 @@ var fuzzCreateSnippets = [][]byte{
 		0x39,       // CODECOPY
 		0x60, 0x0a, // PUSH1 10 (length)
 		0x60, 0x00, // PUSH1 0
-		0xf3,       // RETURN
+		0xf3, // RETURN
 		// runtime code starts here:
 		0x60, 0x01, 0x60, 0x01, 0x54, 0x01, 0x60, 0x01, 0x55, 0x00,
 	},
@@ -421,9 +421,9 @@ func FuzzV2ExecutorVsSerial(f *testing.F) {
 		},
 	}
 	for _, s := range seeds {
-		f.Add(s, uint8(4))   // 4 workers
-		f.Add(s, uint8(1))   // serial-mode V2 (single worker)
-		f.Add(s, uint8(8))   // 8 workers
+		f.Add(s, uint8(4)) // 4 workers
+		f.Add(s, uint8(1)) // serial-mode V2 (single worker)
+		f.Add(s, uint8(8)) // 8 workers
 	}
 
 	f.Fuzz(func(t *testing.T, raw []byte, workers uint8) {
@@ -473,9 +473,7 @@ func TestV2ExecutorVsSerial_SeedCorpus(t *testing.T) {
 	}
 	workerGrid := []int{1, 4, 8}
 	for name, decoded := range cases {
-		decoded := decoded
 		for _, w := range workerGrid {
-			w := w
 			t.Run(name+"/w"+string(rune('0'+w)), func(t *testing.T) {
 				runScenarioAndAssertParity(t, decoded, w)
 			})

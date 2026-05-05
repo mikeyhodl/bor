@@ -327,9 +327,9 @@ func TestPDB_CrossTxSelfDestructVisibility(t *testing.T) {
 // diverging from serial semantics.
 //
 // Two recreation paths exercised:
-//   1. Explicit CREATE (CreateAccount / SetCode) → CreatePath written
-//   2. Implicit recreation via value transfer → only MVBalanceStore touched,
-//      no CreatePath write. Exist's balance fallback must still return true.
+//  1. Explicit CREATE (CreateAccount / SetCode) → CreatePath written
+//  2. Implicit recreation via value transfer → only MVBalanceStore touched,
+//     no CreatePath write. Exist's balance fallback must still return true.
 func TestPDB_CrossTxSelfDestructThenRecreate(t *testing.T) {
 	t.Run("explicit create after destruct", func(t *testing.T) {
 		pdb0, store, bals := newTestPDB(t, 0)

@@ -172,4 +172,3 @@ func (s *MVBalanceStore) DeleteSingle(addr common.Address, txIdx int) {
 	}
 	sh.mu.Unlock()
 }
-

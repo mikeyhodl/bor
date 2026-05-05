@@ -20,20 +20,20 @@ type mockV2State struct {
 	validated  bool
 }
 
-func (s *mockV2State) Validate() bool                            { return s.validated }
+func (s *mockV2State) Validate() bool { return s.validated }
 func (s *mockV2State) ValidateCategory() string {
 	if s.validated {
 		return ""
 	}
 	return "storage"
 }
-func (s *mockV2State) IsBaseOnly() bool                          { return false }
-func (s *mockV2State) MarkEstimate()                             {}
-func (s *mockV2State) CleanupEstimate([]Key, []common.Address)   {}
-func (s *mockV2State) GetWriteKeys() []Key                       { return nil }
-func (s *mockV2State) GetBalAddrs() []common.Address             { return nil }
-func (s *mockV2State) FlushToMVStore()                           { s.flushCount.Add(1) }
-func (s *mockV2State) SetDeferMVWrites(bool)                     {}
+func (s *mockV2State) IsBaseOnly() bool                        { return false }
+func (s *mockV2State) MarkEstimate()                           {}
+func (s *mockV2State) CleanupEstimate([]Key, []common.Address) {}
+func (s *mockV2State) GetWriteKeys() []Key                     { return nil }
+func (s *mockV2State) GetBalAddrs() []common.Address           { return nil }
+func (s *mockV2State) FlushToMVStore()                         { s.flushCount.Add(1) }
+func (s *mockV2State) SetDeferMVWrites(bool)                   {}
 
 type mockV2Task struct{ idx int }
 
@@ -97,7 +97,6 @@ func TestV2DoubleFlushPrevention(t *testing.T) {
 // of initial executions and re-execution dispatches.
 type timedMockV2State struct {
 	mockV2State
-	execDelay      time.Duration
 	failsRemaining int32 // atomic; decrements on each failed Validate()
 	mu             struct {
 		sync.Mutex
@@ -131,7 +130,6 @@ func (s *timedMockV2State) ValidateCategory() string {
 // initial vs tx j's re-execution dispatch.
 type timedMockV2Env struct {
 	delays []time.Duration
-	fails  []int32 // initial failsRemaining for each tx
 	states []*timedMockV2State
 }
 

@@ -160,7 +160,6 @@ func TestPDB_AllGetters_TrackReads(t *testing.T) {
 	const readerTx = 5
 
 	for _, op := range readOps {
-		op := op
 		t.Run(op.name+"/Committed", func(t *testing.T) {
 			pdb, store, bals := newTestPDB(t, readerTx)
 			pdb.EnableReadTracking()
@@ -263,7 +262,6 @@ func TestPDB_AllGetters_AtTxZero(t *testing.T) {
 	slot := common.HexToHash("0x42")
 
 	for _, op := range readOps {
-		op := op
 		if op.kind != storeRead {
 			continue // balance reads have a different writer-id contract
 		}
@@ -305,7 +303,6 @@ func TestPDB_AllGetters_ValidateRoundTrip(t *testing.T) {
 	const readerTx = 5
 
 	for _, op := range readOps {
-		op := op
 		t.Run(op.name, func(t *testing.T) {
 			pdb, store, bals := newTestPDB(t, readerTx)
 			pdb.EnableReadTracking()

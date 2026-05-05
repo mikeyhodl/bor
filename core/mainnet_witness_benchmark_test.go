@@ -927,69 +927,6 @@ func TestBaselineConsistency(t *testing.T) {
 	}
 }
 
-func executeWithParallelStateDBV2(config *params.ChainConfig, block *types.Block, witness *stateless.Witness, author *common.Address, engine consensus.Engine, diskdb ethdb.Database, numProcs int) (common.Hash, error) {
-	memdb := witness.MakeHashDB(diskdb)
-	baseDB, err := state.New(witness.Root(), state.NewDatabase(triedb.NewDatabase(memdb, triedb.HashDefaults), nil))
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	store := blockstm.NewMVStore()
-	bals := blockstm.NewMVBalanceStore()
-
-	// base is read-only pre-block state for ParallelStateDB reads.
-	// finalDB is where settlements are applied.
-	// They MUST be separate — SettleTo modifies finalDB which would corrupt base reads.
-	// Separate memdb for read-only base — no shared trie references
-	readMemdb := witness.MakeHashDB(diskdb)
-	readOnlyBase, _ := state.New(witness.Root(), state.NewDatabase(triedb.NewDatabase(readMemdb, triedb.HashDefaults), nil))
-
-	signer := types.MakeSigner(config, block.Number(), block.Time())
-	blockContext := NewEVMBlockContext(block.Header(), &BlockChain{
-		hc: &HeaderChain{config: config, chainDb: memdb,
-			headerCache: lru.NewCache[common.Hash, *types.Header](256), engine: engine},
-	}, author)
-
-	// Execute each tx on a ParallelStateDB, then settle to finalDB
-	finalDB := baseDB
-	var pdbs []*state.ParallelStateDB
-	var execResults []*ExecutionResult
-
-	for i, tx := range block.Transactions() {
-		if tx.Type() == types.StateSyncTxType {
-			continue
-		}
-
-		msg, err := TransactionToMessage(tx, signer, block.Header().BaseFee)
-		if err != nil {
-			return common.Hash{}, fmt.Errorf("tx %d: %w", i, err)
-		}
-
-		pdb := state.NewParallelStateDB(i, state.NewSafeBase(readOnlyBase, 1), store, bals)
-		evm := vm.NewEVM(blockContext, pdb, config, vm.Config{})
-		evm.SetTxContext(NewEVMTxContext(msg))
-
-		result, err := ApplyMessage(evm, msg, new(GasPool).AddGas(block.GasLimit()))
-		if err != nil {
-			return common.Hash{}, fmt.Errorf("tx %d: %w", i, err)
-		}
-		_ = result
-
-		finalDB.SetTxContext(tx.Hash(), i)
-		pdb.SettleTo(finalDB)
-
-		pdbs = append(pdbs, pdb)
-		execResults = append(execResults, result)
-	}
-	_ = pdbs
-
-	engine.Finalize(nil, block.Header(), finalDB, block.Body(), nil)
-
-	// no debug
-	stateRoot := finalDB.IntermediateRoot(config.IsEIP158(block.Number()))
-	return stateRoot, nil
-}
-
 // ValidatingParallelStateDB wraps ParallelStateDB and compares reads against a reference StateDB.
 type ValidatingParallelStateDB struct {
 	*state.ParallelStateDB
@@ -1005,19 +942,6 @@ func NewValidatingParallelStateDB(txIndex int, base *state.StateDB, store *block
 		ref:             ref,
 		tb:              tb,
 		maxDiffs:        20,
-	}
-}
-
-func (v *ValidatingParallelStateDB) checkBalance(op string, addr common.Address) {
-	if v.diffCount >= v.maxDiffs {
-		return
-	}
-	sBal := v.ref.GetBalance(addr)
-	vBal := v.ParallelStateDB.GetBalance(addr)
-	if sBal.Cmp(vBal) != 0 {
-		v.diffCount++
-		v.tb.Logf("    [%d] %s GetBalance(%s): ref=%s v2=%s", v.diffCount, op, addr.Hex()[:10],
-			sBal.ToBig().String(), vBal.ToBig().String())
 	}
 }
 
@@ -1151,8 +1075,6 @@ func TestAllBlocksConsistency(t *testing.T) {
 	blocks, diskdb := loadBlocksFromDir(t, witnessDir, alchemyURL)
 	runConsistencyCheck(t, blocks, diskdb)
 }
-
-
 
 func runConsistencyCheck(t *testing.T, blocks []testBlockData, diskdb ethdb.Database) {
 	t.Helper()
@@ -1476,7 +1398,9 @@ func TestV2BlockSTMWorkerScaling(t *testing.T) {
 		}, &author)
 		var tasks []V2Task
 		for j, tx := range bd.block.Transactions() {
-			if tx.Type() == types.StateSyncTxType { continue }
+			if tx.Type() == types.StateSyncTxType {
+				continue
+			}
 			msg, _ := TransactionToMessage(tx, signer, bd.block.Header().BaseFee)
 			tasks = append(tasks, V2Task{Index: j, Tx: tx, Msg: msg})
 		}
@@ -1524,17 +1448,17 @@ func TestV2ChainWaitDiagnostic(t *testing.T) {
 	engine := &benchConsensus{}
 
 	type blockStat struct {
-		num         uint64
-		txs         int
-		phase1      time.Duration
-		waitDur     time.Duration
-		checkDur    time.Duration
-		reexecDur   time.Duration
-		settleDur   time.Duration
-		execCount   int
-		vfailCount  int
-		waitPct     float64 // ValWaitDur / Phase1 * 100
-		reexecPct   float64 // ValReexDur / Phase1 * 100
+		num        uint64
+		txs        int
+		phase1     time.Duration
+		waitDur    time.Duration
+		checkDur   time.Duration
+		reexecDur  time.Duration
+		settleDur  time.Duration
+		execCount  int
+		vfailCount int
+		waitPct    float64 // ValWaitDur / Phase1 * 100
+		reexecPct  float64 // ValReexDur / Phase1 * 100
 	}
 	stats := make([]blockStat, 0, len(allBlocks))
 
@@ -1632,7 +1556,6 @@ func TestV2ChainWaitDiagnostic(t *testing.T) {
 	}
 }
 
-
 // BenchmarkV2Embedded benchmarks Serial vs V2 on the 10 embedded testdata blocks.
 // No external data or Alchemy URL needed — runs in CI.
 func BenchmarkV2Embedded(b *testing.B) {
@@ -1671,7 +1594,6 @@ func BenchmarkV2Embedded(b *testing.B) {
 		})
 	}
 }
-
 
 // BenchmarkV2AllBlocks benchmarks all 241 witness blocks.
 // Run with: BOR_BLOCKSTM_TEST=1 go test -run='^$' -bench=BenchmarkV2AllBlocks ./core/
@@ -1872,7 +1794,7 @@ func runV2BlockSTMConsistency(t *testing.T, blocks []testBlockData, diskdb ethdb
 		totalVFails += result.VFailCount
 		t.Logf("  block %d: serial=%v v2_total=%v vfails=%d/%d",
 			blockNum, serialDur.Round(time.Millisecond),
-			(time.Duration(result.Phase1)).Round(time.Millisecond),
+			result.Phase1.Round(time.Millisecond),
 			result.VFailCount, len(tasks))
 		if i > 0 && i%20 == 0 {
 			runtime.GC()

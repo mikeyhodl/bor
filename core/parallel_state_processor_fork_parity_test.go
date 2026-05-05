@@ -55,19 +55,19 @@ type forkExpect struct {
 var forkExpectations = map[string]forkExpect{
 	// Pre-Byzantium forks affect EVM gas/precompiles only. Neither
 	// state processor branches on them directly.
-	"IsHomestead":      {inV1: false, inV2: false},
-	"IsEIP150":         {inV1: false, inV2: false},
-	"IsEIP155":         {inV1: false, inV2: false},
-	"IsDAOFork":        {inV1: false, inV2: false}, // ApplyDAOHardFork is gated by config.DAOForkSupport, not IsDAOFork.
-	"IsConstantinople": {inV1: false, inV2: false},
-	"IsPetersburg":     {inV1: false, inV2: false},
-	"IsIstanbul":       {inV1: false, inV2: false},
-	"IsBerlin":         {inV1: false, inV2: false},
-	"IsMuirGlacier":    {inV1: false, inV2: false},
-	"IsArrowGlacier":   {inV1: false, inV2: false},
-	"IsGrayGlacier":    {inV1: false, inV2: false},
-	"IsShanghai":       {inV1: false, inV2: false}, // EIP-3651 warm coinbase happens inside Prepare; not gated here.
-	"IsCancun":         {inV1: false, inV2: false}, // BeaconRoot system call is gated by block.BeaconRoot != nil.
+	"IsHomestead":        {inV1: false, inV2: false},
+	"IsEIP150":           {inV1: false, inV2: false},
+	"IsEIP155":           {inV1: false, inV2: false},
+	"IsDAOFork":          {inV1: false, inV2: false}, // ApplyDAOHardFork is gated by config.DAOForkSupport, not IsDAOFork.
+	"IsConstantinople":   {inV1: false, inV2: false},
+	"IsPetersburg":       {inV1: false, inV2: false},
+	"IsIstanbul":         {inV1: false, inV2: false},
+	"IsBerlin":           {inV1: false, inV2: false},
+	"IsMuirGlacier":      {inV1: false, inV2: false},
+	"IsArrowGlacier":     {inV1: false, inV2: false},
+	"IsGrayGlacier":      {inV1: false, inV2: false},
+	"IsShanghai":         {inV1: false, inV2: false}, // EIP-3651 warm coinbase happens inside Prepare; not gated here.
+	"IsCancun":           {inV1: false, inV2: false}, // BeaconRoot system call is gated by block.BeaconRoot != nil.
 	"IsTerminalPoWBlock": {inV1: false, inV2: false},
 	"IsPostMerge":        {inV1: false, inV2: false},
 	"IsVerkleGenesis":    {inV1: false, inV2: false},
