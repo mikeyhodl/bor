@@ -29,15 +29,28 @@ type writeBloom struct {
 }
 
 // bloomHashes computes 3 independent bit positions from a Key.
-// h1 uses address bytes [0:4], h2 uses hash bytes [20:24], h3 mixes [8:12]^[28:32].
-// For state keys (address+hash) all three have good entropy. For address-only
-// keys (hash bytes are zero) h2 degrades but h1 and h3 still distinguish keys.
+//
+// All three hashes draw from byte ranges that are populated for every key
+// class (address-only, subpath, state). The Key layout is:
+//
+//	[0:20]  address
+//	[20:52] storage hash (zero for address-only and subpath keys)
+//	[52]    subpath byte (zero for address-only and state keys)
+//	[53]    type byte
+//
+// h1 covers the address prefix and h2 covers the address tail — both are
+// always populated, so neither dimension collapses to a constant for any
+// key class. h3 mixes the address middle with the hash tail and the
+// subpath/type bytes, so address-only / subpath / state keys are all
+// distinguishable in the third dimension as well.
 func bloomHashes(k Key) (uint, uint, uint) {
-	_ = k[31] // bounds check hint
+	_ = k[53] // bounds check hint (covers all reads below)
 	h1 := uint(k[0]) | uint(k[1])<<8 | uint(k[2])<<16 | uint(k[3])<<24
-	h2 := uint(k[20]) | uint(k[21])<<8 | uint(k[22])<<16 | uint(k[23])<<24
-	h3 := (uint(k[8]) ^ uint(k[28])) | (uint(k[9])^uint(k[29]))<<8 |
-		(uint(k[10])^uint(k[30]))<<16 | (uint(k[11])^uint(k[31]))<<24
+	h2 := uint(k[16]) | uint(k[17])<<8 | uint(k[18])<<16 | uint(k[19])<<24
+	h3 := (uint(k[8]) ^ uint(k[28]) ^ uint(k[52])) |
+		(uint(k[9])^uint(k[29]))<<8 |
+		(uint(k[10])^uint(k[30]))<<16 |
+		(uint(k[11])^uint(k[31])^uint(k[53]))<<24
 	return h1 & bloomMask, h2 & bloomMask, h3 & bloomMask
 }
 

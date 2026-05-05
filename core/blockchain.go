@@ -414,10 +414,6 @@ type BlockChain struct {
 	parallelProcessor              Processor // Parallel block transaction processor interface
 	parallelSpeculativeProcesses   int       // Number of parallel speculative processes
 	enforceParallelProcessor       bool
-	AblationSkipFlush              bool        // Ablation: skip FlushMVWriteSet
-	AblationSkipSettle             bool        // Ablation: skip Settle
-	AblationSkipFinalise           bool        // Ablation: skip worker Finalise
-	AblationSkipMVRead             bool        // Ablation: flush normally but MVRead returns None
 	parallelStatelessImportEnabled atomic.Bool // Whether parallel stateless import is enabled via config
 	parallelStatelessImportWorkers int         // Number of workers to use for parallel stateless import
 	forker                         *ForkChoice
@@ -913,14 +909,12 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 
 	result := <-resultChan
 
-	// Cancel context immediately so the losing processor stops at the next
-	// tx boundary, and signal the throwaway prefetcher to stop. This must
-	// happen BEFORE ProcessBlock returns, because the caller will commit
-	// the block (advancing the pathdb layer), which would invalidate any
-	// trie references still held by the loser's prefetcher.
-	cancel()
-	followupInterrupt.Store(true)
-
+	// If V2 returned an error (panic, ApplyMessage consensus error, etc.)
+	// and the serial processor is also running, fall back to the serial
+	// result BEFORE cancelling — cancelling first would interrupt the
+	// still-running serial processor at its next tx boundary and the
+	// fallback would receive context.Canceled instead of a usable
+	// recovery. The fallback IS the recovery; it must run to completion.
 	if result.parallel && result.err != nil {
 		log.Warn("Parallel state processor failed", "number", block.NumberU64(), "hash", block.Hash(), "err", result.err)
 		blockExecutionParallelErrorCounter.Inc(1)
@@ -931,6 +925,15 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 			processorCount--
 		}
 	}
+
+	// With the result we plan to keep in hand, cancel the shared context
+	// so the loser (if any) stops at its next tx boundary, and signal the
+	// throwaway prefetcher to stop. This must happen BEFORE ProcessBlock
+	// returns, because the caller will commit the block (advancing the
+	// pathdb layer), which would invalidate any trie references still
+	// held by the loser's prefetcher.
+	cancel()
+	followupInterrupt.Store(true)
 
 	result.counter.Inc(1)
 
