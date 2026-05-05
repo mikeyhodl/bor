@@ -726,6 +726,7 @@ func (s *StateDB) Empty(addr common.Address) bool {
 const BalancePath = 1
 const NoncePath = 2
 const CodePath = 3
+
 // SuicidePath flags an account as self-destructed. V1 uses it as an MVHashMap
 // key on the serial StateDB; V2 uses it as an MVStore subpath so later txs
 // in the same block see the account as non-existent during parallel reads.
@@ -2188,6 +2189,12 @@ func (s *StateDB) AddBalanceDirect(addr common.Address, amount *uint256.Int) {
 }
 
 // SubBalanceDirect subtracts balance without journaling.
+//
+// uint256.Int.Sub wraps on underflow — same modular-arithmetic semantics
+// as the journaled SubBalance path (statedb.go:922-940). TestDirectSetter
+// Parity_SubBalance pins byte-equality between the two, so this MUST stay
+// consistent with that behaviour. The EVM's CALL/transfer pre-checks
+// guarantee amount ≤ balance for any code path that reaches a settle.
 func (s *StateDB) SubBalanceDirect(addr common.Address, amount *uint256.Int) {
 	obj := s.getOrNewStateObject(addr)
 	if obj == nil {

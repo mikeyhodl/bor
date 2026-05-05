@@ -663,7 +663,7 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 		MaxUsedGas:           peakGasUsed,
 		Err:                  vmerr,
 		ReturnData:           ret,
-		SenderInitBalance:    func() *big.Int { if input1 != nil { return input1.ToBig() }; return nil }(),
+		SenderInitBalance:    input1.ToBig(),
 		FeeBurnt:             burnAmount,
 		BurntContractAddress: burntContractAddress,
 		FeeTipped:            amount,

@@ -266,7 +266,8 @@ func opKeccak256(pc *uint64, evm *EVM, scope *ScopeContext) ([]byte, error) {
 		var key [64]byte
 		copy(key[:], data)
 		if cached, ok := evm.Config.Keccak256Cache.Load(key); ok {
-			size.SetBytes(cached.(common.Hash).Bytes())
+			h := cached.(common.Hash)
+			size.SetBytes32(h[:])
 			return nil, nil
 		}
 		evm.hasher.Reset()

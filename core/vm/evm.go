@@ -67,8 +67,11 @@ func (evm *EVM) runPrecompile(p PrecompiledContract, addr common.Address, input 
 // precompile: input ≤ 128 bytes, cache present. Falls back to running the
 // precompile when the cache misses, then stores a successful result.
 func (evm *EVM) runEcrecoverWithCache(p PrecompiledContract, input []byte, gas uint64, cache *sync.Map) ([]byte, uint64, error) {
+	// key is zero-initialised; copy fills the prefix and leaves the rest
+	// as zeros, which matches RightPadBytes(input, 128) without the
+	// extra heap allocation. Caller already enforced len(input) <= 128.
 	var key [128]byte
-	copy(key[:], common.RightPadBytes(input, 128))
+	copy(key[:], input)
 	if cached, ok := cache.Load(key); ok {
 		gasCost := p.RequiredGas(input)
 		if gas < gasCost {
@@ -200,7 +203,7 @@ func (evm *EVM) SetInterrupt(interrupt *atomic.Bool) {
 // state transition of a block, with the transaction context switched as
 // needed by calling evm.SetTxContext.
 func NewEVM(blockCtx BlockContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {
-	jd := JumpDestCache(newMapJumpDests())
+	jd := newMapJumpDests()
 	if config.SharedJumpDestCache != nil {
 		jd = config.SharedJumpDestCache
 	}
