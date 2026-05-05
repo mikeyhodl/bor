@@ -8,8 +8,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/blockstm"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/triedb"
 )
 
 // ---------------------------------------------------------------------------
@@ -919,5 +921,161 @@ func TestPDB_EmitTransferLog_SelfTransfer(t *testing.T) {
 	pdb.emitTransferLog(final, tr, amt)
 	if !called {
 		t.Fatal("TransferLogFn not invoked for self-transfer")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tier-1 mutation kill tests — targeted at survivors flagged by diffguard.
+// Each pins a specific boundary / branch / boolean / return-value mutation
+// that prior tests did not kill.
+// ---------------------------------------------------------------------------
+
+// TestPDB_EnableReadTracking_InitializesBalAddrs pins the `s.BalAddrs == nil`
+// guard at parallel_statedb.go:335 (EnableReadTracking). Flipping == to !=
+// would skip the make() on a fresh PDB; recordBalWrite would still work via
+// nil-append, but cap(BalAddrs) would stay 0 instead of the documented 8 —
+// inviting reallocation churn on every per-tx write. Lock the pre-allocated
+// capacity in here.
+func TestPDB_EnableReadTracking_InitializesBalAddrs(t *testing.T) {
+	pdb, _, _ := newTestPDB(t, 0)
+	if pdb.BalAddrs != nil {
+		t.Fatalf("precondition: fresh PDB should have nil BalAddrs, got len=%d cap=%d",
+			len(pdb.BalAddrs), cap(pdb.BalAddrs))
+	}
+
+	pdb.EnableReadTracking()
+
+	if pdb.BalAddrs == nil {
+		t.Fatal("EnableReadTracking did not initialize BalAddrs (still nil after call)")
+	}
+	if cap(pdb.BalAddrs) < 8 {
+		t.Fatalf("EnableReadTracking allocated BalAddrs with cap=%d, want >=8 (the documented hint)",
+			cap(pdb.BalAddrs))
+	}
+}
+
+// TestPDB_PriorDestructedAt_RecordsAbsenceRead pins the else-if branch at
+// parallel_statedb.go:531 (priorDestructedAt). Removing the body drops
+// `s.recordStoreRead(suicideKey, -1, 0, nil)` — the absence read that lets
+// validation catch a later writer for SuicidePath_addr. Without it, a tx
+// that observed "addr is not destructed" can pass validation even if a
+// concurrent prior tx subsequently destructs addr.
+func TestPDB_PriorDestructedAt_RecordsAbsenceRead(t *testing.T) {
+	pdb, store, _ := newTestPDB(t, 5)
+	pdb.EnableReadTracking()
+	addr := common.HexToAddress("0xfeed")
+
+	// No SuicidePath entry in MVStore yet; the lookup misses.
+	if got := pdb.priorDestructedAt(addr); got != -1 {
+		t.Fatalf("priorDestructedAt with no MVStore entry: got %d, want -1", got)
+	}
+
+	// The miss must be recorded as a base-read (WriterIdx=-1, StoreVal=nil)
+	// in StoreReads — that's the validation hook.
+	suicideKey := blockstm.NewSubpathKey(addr, SuicidePath)
+	found := false
+	for _, rd := range pdb.StoreReads {
+		if rd.Key == suicideKey && rd.WriterIdx == -1 && rd.StoreVal == nil {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("priorDestructedAt must record an absence read for SuicidePath; without it, " +
+			"validation cannot detect a concurrent prior tx destructing addr")
+	}
+
+	// Sanity: now write a SuicidePath entry from tx 2 and assert validation fails.
+	store.WriteInc(suicideKey, 2, 0, true)
+	r := pdb.ValidateDetailed()
+	if r.Valid {
+		t.Fatal("validation must fail: recorded 'not destructed' but tx 2 destructed addr")
+	}
+}
+
+// TestPDB_Exist_DestructedInBaseReturnsFalse pins the `if suicideIdx >= 0`
+// branch at parallel_statedb.go:576. Removing the body lets a destructed
+// addr fall through to `s.base.Exist(addr)` and incorrectly return true
+// when the account exists in base state. We need addr to ALSO exist in
+// base so the fallthrough path is observable — without that, Exist
+// returns false on the fallthrough too (zero balance, no base account)
+// and the mutation looks behaviourally equivalent.
+func TestPDB_Exist_DestructedInBaseReturnsFalse(t *testing.T) {
+	t.Helper()
+	memdb := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(memdb, triedb.HashDefaults)
+	sdb, err := New(types.EmptyRootHash, NewDatabase(tdb, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := common.HexToAddress("0xdead")
+	// Seed the base StateDB so the account DOES exist there.
+	sdb.SetCode(addr, []byte{0x01, 0x02}, tracing.CodeChangeUnspecified)
+
+	base := NewSafeBase(sdb, 2)
+	store := blockstm.NewMVStore()
+	bals := blockstm.NewMVBalanceStore()
+	pdb := NewParallelStateDB(5, base, store, bals)
+	pdb.Incarnation = 0
+
+	// Simulate a prior tx (tx=2) destructing addr — write to MVStore directly.
+	suicideKey := blockstm.NewSubpathKey(addr, SuicidePath)
+	store.WriteInc(suicideKey, 2, 0, true)
+
+	// With the destruct branch in place, Exist returns false. With the branch
+	// removed, Exist falls through and base.Exist(addr) returns true (since
+	// we seeded the base above), incorrectly making Exist return true.
+	if pdb.Exist(addr) {
+		t.Fatal("Exist must return false for a prior-destructed addr even when " +
+			"the account exists in base state — the destruct should win")
+	}
+}
+
+// TestPDB_CreateAccount_WritesTrueValue pins the literal `true` at
+// parallel_statedb.go:1014 (CreateAccount → store.WriteInc). Flipping it
+// to false would have CreateAccount publish (CreatePath_addr, txIdx, inc,
+// false) — readers would then see the create-marker as false instead of
+// true, defeating the value-based fallback in storeReadMatches.
+func TestPDB_CreateAccount_WritesTrueValue(t *testing.T) {
+	pdb, store, _ := newTestPDB(t, 3)
+	addr := common.HexToAddress("0xc0de")
+	pdb.CreateAccount(addr)
+
+	createKey := blockstm.NewSubpathKey(addr, CreatePath)
+	val, found := store.Read(createKey, 10)
+	if !found {
+		t.Fatal("CreateAccount did not write CreatePath to MVStore (DeferMVWrites=false)")
+	}
+	b, ok := val.(bool)
+	if !ok {
+		t.Fatalf("CreatePath MVStore value type: got %T, want bool", val)
+	}
+	if !b {
+		t.Fatal("CreateAccount wrote CreatePath=false; must be true (account-exists marker)")
+	}
+}
+
+// TestPDB_DiagnoseBalanceRead_MatchReturnsFalse pins the `false` literal at
+// parallel_statedb_validate.go:215 (diagnoseBalanceRead). Flipping to true
+// would have a MATCHING balance read produce a phantom diagnostic with
+// zero-valued fields — DiagnoseValidation aggregates these and downstream
+// vfail-attribution would see a flood of empty "balance" diagnostics on
+// every successfully-validated block.
+func TestPDB_DiagnoseBalanceRead_MatchReturnsFalse(t *testing.T) {
+	pdb, _, _ := newTestPDB(t, 5)
+	pdb.EnableReadTracking()
+	addr := common.HexToAddress("0xbeef")
+
+	// Read the balance: with no MVBalanceStore entries, the cumulative delta
+	// is zero on both the recorded read and the live re-read. The diagnose
+	// path must report ok=false (no diag) — and must NOT append a phantom
+	// zero-valued ValidationDiag to the result.
+	pdb.GetBalance(addr)
+
+	diags := pdb.DiagnoseValidation()
+	if len(diags) != 0 {
+		t.Fatalf("matching balance read produced %d diagnostics, want 0; "+
+			"flipping the false return to true would emit phantom zero-valued diags: %+v",
+			len(diags), diags)
 	}
 }
