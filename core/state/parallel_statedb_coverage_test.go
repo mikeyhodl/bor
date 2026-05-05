@@ -425,6 +425,40 @@ func TestPDB_SelfDestruct(t *testing.T) {
 	}
 }
 
+// TestPDB_SelfDestruct_RecordsSuicidePathWrite pins that SelfDestruct
+// adds the SuicidePath key to WriteKeys so MarkEstimate / CleanupEstimate
+// can reach the FlushToMVStore-written entry on re-execution. Without this,
+// a stale SuicidePath entry from incarnation N survives into incarnation
+// N+1's view and a downstream reader can pass validation against state
+// that no longer exists — a state-root divergence path.
+func TestPDB_SelfDestruct_RecordsSuicidePathWrite(t *testing.T) {
+	pdb, _, _ := newTestPDB(t, 5)
+	pdb.EnableReadTracking() // recordWrite is gated on trackReads
+	addr := common.HexToAddress("0xaabb")
+	pdb.AddBalance(addr, uint256.NewInt(42), tracing.BalanceChangeUnspecified)
+
+	pdb.SelfDestruct(addr)
+
+	wantKey := blockstm.NewSubpathKey(addr, SuicidePath)
+	found := false
+	for _, k := range pdb.WriteKeys {
+		if k == wantKey {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SelfDestruct did not record SuicidePath write — MarkEstimate/CleanupEstimate would miss it on re-execution")
+	}
+
+	// Repeated SelfDestruct in the same tx must NOT add a duplicate entry.
+	beforeLen := len(pdb.WriteKeys)
+	pdb.SelfDestruct(addr)
+	if len(pdb.WriteKeys) != beforeLen {
+		t.Fatalf("repeated SelfDestruct duplicated SuicidePath in WriteKeys: %d → %d", beforeLen, len(pdb.WriteKeys))
+	}
+}
+
 // TestPDB_SelfDestruct6780_NewContract deletes and returns (bal, true) when
 // the contract was created in this tx.
 func TestPDB_SelfDestruct6780_NewContract(t *testing.T) {

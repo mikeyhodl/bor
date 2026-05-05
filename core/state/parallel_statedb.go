@@ -986,6 +986,16 @@ func (s *ParallelStateDB) SelfDestruct(addr common.Address) uint256.Int {
 	if !s.destructed[addr] {
 		s.journalEntries = append(s.journalEntries, parallelJournalEntry{kind: jkDestruct, addr: addr})
 		s.destructed[addr] = true
+		// FlushToMVStore writes (SuicidePath_addr, txIdx, inc, true) for
+		// every entry in s.destructed; record the matching key so that
+		// MarkEstimate / CleanupEstimate reach it on re-execution. Other
+		// MVStore-targeting writers (SetNonce / SetCode / SetState /
+		// CreateAccount) all call recordWrite for the same reason —
+		// without this, a stale SuicidePath entry from incarnation N
+		// survives into incarnation N+1's view and a downstream tx that
+		// observed it can pass validation against state that no longer
+		// exists.
+		s.recordWrite(blockstm.NewSubpathKey(addr, SuicidePath))
 	}
 	s.SubBalance(addr, &bal, tracing.BalanceDecreaseSelfdestruct)
 	return bal

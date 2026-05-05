@@ -1031,8 +1031,15 @@ func (p *V2StateProcessor) Process(block *types.Block, statedb *state.StateDB, c
 	tSetup := time.Now()
 
 	finalDB := statedb
+	// Preserve the witness pointer wired by ProcessBlock.StartPrefetcher
+	// across the prefetcher swap. StateDB.StartPrefetcher unconditionally
+	// overwrites s.witness, so passing nil here would silently turn off
+	// every s.witness != nil-gated collection point (CollectStateWitness,
+	// CollectCodeWitness, settle-phase trie walks) for the rest of V2's
+	// execution — the produced witness would land empty.
+	prevWitness := finalDB.Witness()
 	finalDB.StopPrefetcher()
-	finalDB.StartPrefetcher("v2-settle", nil, nil)
+	finalDB.StartPrefetcher("v2-settle", prevWitness, nil)
 	finalDB.SkipTimers()
 	readBase := statedb.Copy()
 	store := blockstm.NewMVStore()

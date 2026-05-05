@@ -729,48 +729,59 @@ func (bc *BlockChain) fireBlockStart(block *types.Block) {
 // muSubTries throughout — switching mid-flight would race.
 func (bc *BlockChain) setupBlockReaders(parentRoot common.Hash) (
 	throwaway, statedb, parallelStatedb *state.StateDB,
-	prefetch, process state.ReaderWithStats, err error,
+	prefetch, process, parallel state.ReaderWithStats, err error,
 ) {
-	prefetch, process, parallel, err := bc.statedb.ReadersWithCacheStatsTriple(parentRoot)
+	prefetch, process, parallel, err = bc.statedb.ReadersWithCacheStatsTriple(parentRoot)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if throwaway, err = state.NewWithReader(parentRoot, bc.statedb, prefetch); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if statedb, err = state.NewWithReader(parentRoot, bc.statedb, process); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	if parallelStatedb, err = state.NewWithReader(parentRoot, bc.statedb, parallel); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	parallelStatedb.EnableConcurrentReads()
-	return throwaway, statedb, parallelStatedb, prefetch, process, nil
+	return throwaway, statedb, parallelStatedb, prefetch, process, parallel, nil
 }
 
-// reportReaderStats marks per-block cache hit/miss meters from prefetch and
-// process readers. Intended to be called via defer at the end of ProcessBlock.
-func reportReaderStats(prefetch, process state.ReaderWithStats) {
+// reportReaderStats marks per-block cache hit/miss meters from prefetch,
+// process, and parallel readers. Intended to be called via defer at the
+// end of ProcessBlock.
+//
+// process and parallel both use the roleProcess label internally and
+// share the same underlying cache, but ReadersWithCacheStatsTriple
+// returns independent ReaderWithStats wrappers, so V2's reads accumulate
+// in `parallel`'s atomic counters separately from V1's `process` counters.
+// We merge them into the same meter set here so the cache-hit-rate
+// dashboards reflect the work the winning processor (typically V2) did,
+// rather than only the losing serial path's interrupted reads.
+func reportReaderStats(prefetch, process, parallel state.ReaderWithStats) {
 	stats := prefetch.GetStats()
 	accountCacheHitPrefetchMeter.Mark(stats.AccountHit)
 	accountCacheMissPrefetchMeter.Mark(stats.AccountMiss)
 	storageCacheHitPrefetchMeter.Mark(stats.StorageHit)
 	storageCacheMissPrefetchMeter.Mark(stats.StorageMiss)
 
-	stats = process.GetStats()
-	accountCacheHitMeter.Mark(stats.AccountHit)
-	accountCacheMissMeter.Mark(stats.AccountMiss)
-	storageCacheHitMeter.Mark(stats.StorageHit)
-	storageCacheMissMeter.Mark(stats.StorageMiss)
+	procStats := process.GetStats()
+	parStats := parallel.GetStats()
+	accountCacheHitMeter.Mark(procStats.AccountHit + parStats.AccountHit)
+	accountCacheMissMeter.Mark(procStats.AccountMiss + parStats.AccountMiss)
+	storageCacheHitMeter.Mark(procStats.StorageHit + parStats.StorageHit)
+	storageCacheMissMeter.Mark(procStats.StorageMiss + parStats.StorageMiss)
 
 	prefetchStats := prefetch.GetPrefetchStats()
 	accountInsertPrefetchMeter.Mark(prefetchStats.AccountInsert)
 	storageInsertPrefetchMeter.Mark(prefetchStats.StorageInsert)
 
-	processStats := process.GetPrefetchStats()
-	accountHitFromPrefetchMeter.Mark(processStats.AccountHitFromPrefetch)
-	storageHitFromPrefetchMeter.Mark(processStats.StorageHitFromPrefetch)
-	accountHitFromPrefetchUniqueMeter.Mark(processStats.AccountHitFromPrefetchUnique)
+	procPF := process.GetPrefetchStats()
+	parPF := parallel.GetPrefetchStats()
+	accountHitFromPrefetchMeter.Mark(procPF.AccountHitFromPrefetch + parPF.AccountHitFromPrefetch)
+	storageHitFromPrefetchMeter.Mark(procPF.StorageHitFromPrefetch + parPF.StorageHitFromPrefetch)
+	accountHitFromPrefetchUniqueMeter.Mark(procPF.AccountHitFromPrefetchUnique + parPF.AccountHitFromPrefetchUnique)
 }
 
 // sharedBlockCaches holds VM-level caches that are shared between the
@@ -826,11 +837,11 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		defer func() { bc.logger.OnBlockEnd(blockEndErr) }()
 	}
 
-	throwaway, statedb, parallelStatedb, prefetch, process, err := bc.setupBlockReaders(parent.Root)
+	throwaway, statedb, parallelStatedb, prefetch, process, parallel, err := bc.setupBlockReaders(parent.Root)
 	if err != nil {
 		return nil, nil, 0, nil, 0, err
 	}
-	defer reportReaderStats(prefetch, process)
+	defer reportReaderStats(prefetch, process, parallel)
 
 	// Shared caches for this block — used by both prefetcher and V2 workers.
 	sharedCaches := newSharedBlockCaches()
