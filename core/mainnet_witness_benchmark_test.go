@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -135,23 +136,43 @@ type blockJSON struct {
 // Witness / block loading
 // ---------------------------------------------------------------------------
 
-// readFileMaybeGz reads a file, decompressing if it ends with .gz.
+// errLFSPointer is returned when a file under core/blockstm/testdata/ is
+// still a Git LFS pointer (text stub) rather than the actual data blob —
+// i.e. the contributor or CI runner hasn't run `git lfs pull`. Callers
+// should treat this as "skip the test, fixtures unavailable" rather than
+// fail the run.
+var errLFSPointer = errors.New("git LFS pointer file (run `git lfs pull` to materialize testdata)")
+
+// isLFSPointer reports whether b looks like a Git LFS pointer file. The
+// canonical first line is `version https://git-lfs.github.com/spec/v1`,
+// so checking the leading "version " prefix is enough.
+func isLFSPointer(b []byte) bool {
+	const lfsPrefix = "version https://git-lfs.github.com/spec/"
+	return len(b) >= len(lfsPrefix) && string(b[:len(lfsPrefix)]) == lfsPrefix
+}
+
+// readFileMaybeGz reads a file, decompressing if it ends with .gz. Returns
+// errLFSPointer (wrapped) if the file is a Git LFS pointer rather than
+// real content — common on fresh clones / CI runners that haven't pulled
+// LFS yet.
 func readFileMaybeGz(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	if isLFSPointer(raw) {
+		return nil, fmt.Errorf("%s: %w", path, errLFSPointer)
+	}
 
 	if strings.HasSuffix(path, ".gz") {
-		gr, err := gzip.NewReader(f)
+		gr, err := gzip.NewReader(bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		defer gr.Close()
 		return io.ReadAll(gr)
 	}
-	return io.ReadAll(f)
+	return raw, nil
 }
 
 func loadWitnessFromJSON(path string) (*stateless.Witness, error) {
@@ -738,11 +759,18 @@ func loadEmbeddedBlocks(t testing.TB) ([]testBlockData, ethdb.Database) {
 		}
 		witness, err := loadWitnessFromJSON(witnessPath)
 		if err != nil {
+			if errors.Is(err, errLFSPointer) {
+				t.Skipf("testdata not materialized: %v", err)
+			}
 			t.Fatalf("loading witness %s: %v", blockHex, err)
 		}
-		blockData, err := os.ReadFile(filepath.Join(witnessDir, blockHex+".block"))
+		blockPath := filepath.Join(witnessDir, blockHex+".block")
+		blockData, err := os.ReadFile(blockPath)
 		if err != nil {
 			t.Fatalf("loading block %s: %v", blockHex, err)
+		}
+		if isLFSPointer(blockData) {
+			t.Skipf("testdata not materialized: %s: %v", blockPath, errLFSPointer)
 		}
 		block, stateRoot, receiptRoot, err := parseBlockFromJSON(blockData)
 		if err != nil {
@@ -794,12 +822,18 @@ func loadBlocksFromDir(t testing.TB, dir string, alchemyURL string) ([]testBlock
 		witnessPath := filepath.Join(dir, name)
 		witness, err := loadWitnessFromJSON(witnessPath)
 		if err != nil {
+			if errors.Is(err, errLFSPointer) {
+				t.Skipf("testdata not materialized: %v", err)
+			}
 			t.Fatalf("loading witness %s: %v", blockHex, err)
 		}
 
 		// Try block file: .block first, then fetch from RPC
 		var blockData []byte
 		if data, err := os.ReadFile(filepath.Join(dir, blockHex+".block")); err == nil {
+			if isLFSPointer(data) {
+				t.Skipf("testdata not materialized: %s: %v", filepath.Join(dir, blockHex+".block"), errLFSPointer)
+			}
 			blockData = data
 		} else if data, err := fetchAndCacheBlock(blockHex, alchemyURL); err == nil {
 			blockData = data
