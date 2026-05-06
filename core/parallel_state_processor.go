@@ -614,9 +614,16 @@ type v2Env struct {
 	vmConfig    vm.Config
 	chainConfig *params.ChainConfig
 	gasLimit    uint64
-	jumpDests   vm.JumpDestCache
-	safeBase    *state.SafeBase             // shared across all workers (with read cache)
-	recycleCh   chan *state.ParallelStateDB // pool of reusable PDBs
+	// jumpDests is a fallback per-v2Env JUMPDEST cache used only when the
+	// caller did NOT supply vmConfig.SharedJumpDestCache. In production,
+	// blockchain.go wires sharedCaches.jumpDests (warmed by the prefetcher)
+	// onto vmConfig and vm.NewEVM picks it up — overriding it here would
+	// throw away the prefetcher's analysis. The fallback path matters for
+	// callers that bypass ProcessBlock (benchmarks, single-block witness
+	// processing) where no shared cache is provided.
+	jumpDests vm.JumpDestCache
+	safeBase  *state.SafeBase             // shared across all workers (with read cache)
+	recycleCh chan *state.ParallelStateDB // pool of reusable PDBs
 }
 
 func (e *v2Env) BaseNonce(addr common.Address) uint64 {
@@ -647,7 +654,10 @@ func (e *v2Env) Execute(task blockstm.V2Task, workerID int, incarnation int,
 	pdb := e.preparePDB(t, incarnation, senderNonces, coinbase, waitForTx, waitForFinal, deferWrites)
 
 	evm := vm.NewEVM(e.blockCtx, pdb, e.chainConfig, e.vmConfig)
-	if e.jumpDests != nil {
+	// Only override with the per-v2Env fallback cache when no shared cache
+	// is configured. vm.NewEVM has already wired vmConfig.SharedJumpDestCache
+	// onto evm.jumpDests — overriding it would discard the prefetcher's work.
+	if e.vmConfig.SharedJumpDestCache == nil && e.jumpDests != nil {
 		evm.SetJumpDestCache(e.jumpDests)
 	}
 	evm.SetTxContext(NewEVMTxContext(t.msg))
@@ -878,6 +888,14 @@ func newV2Env(base *state.StateDB, store *blockstm.MVStore, bals *blockstm.MVBal
 	if sc := base.StorageCache(); sc != nil {
 		sharedSafeBase.SharedStorageCache = sc
 	}
+	// Allocate the per-v2Env fallback only when the caller didn't supply a
+	// shared cache. Production (blockchain.go) sets vmConfig.SharedJumpDestCache
+	// on the prefetcher-warmed cache, so allocating here would just be dead
+	// memory. Benchmarks and single-block witness paths bypass that wiring.
+	var fallbackJumpDests vm.JumpDestCache
+	if vmConfig.SharedJumpDestCache == nil {
+		fallbackJumpDests = vm.NewSyncJumpDestCache()
+	}
 	return &v2Env{
 		base:        base,
 		store:       store,
@@ -886,7 +904,7 @@ func newV2Env(base *state.StateDB, store *blockstm.MVStore, bals *blockstm.MVBal
 		vmConfig:    vmConfig,
 		chainConfig: chainConfig,
 		gasLimit:    gasLimit,
-		jumpDests:   vm.NewSyncJumpDestCache(),
+		jumpDests:   fallbackJumpDests,
 		safeBase:    sharedSafeBase,
 		recycleCh:   make(chan *state.ParallelStateDB, numWorkers*blockstm.InFlightTaskMultiplier),
 	}

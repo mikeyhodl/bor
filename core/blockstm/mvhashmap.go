@@ -169,7 +169,6 @@ type MVHashMap struct {
 	// index for O(1) lookup of the latest writer per key.
 
 	// Ablation flags for performance experiments
-	SkipFlush    bool
 	SkipSettle   bool
 	SkipFinalise bool
 	SkipMVRead   bool // flush normally but MVRead always returns None

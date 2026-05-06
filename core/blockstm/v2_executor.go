@@ -346,17 +346,33 @@ func (x *v2ExecCtx) waitForFinal(writerIdx int) {
 
 // execute runs (or re-runs) tx taskIdx — waits for predicted predecessors,
 // invokes env.Execute, flushes writes, and stores the resulting V2TxState.
+//
+// On ctx cancellation we return early without populating x.states[taskIdx].
+// The worker loop still closes execDone[taskIdx] (line 382), which unblocks
+// any later worker waiting at <-execDone[prev] in the cascading toPrev
+// chain. Without these ctx selects, a worker that hits the same-To
+// predecessor wait while runValidationLoop is being torn down can hang
+// forever — completionCh[k-1] is closed only by finishReexec/finalizePass,
+// both of which the loop deliberately skips on cancellation.
 func (x *v2ExecCtx) execute(taskIdx, workerID int) {
 	// If the immediately preceding tx failed validation AND shares the same
 	// To address, wait for it. Independent txs (different contract) can
 	// proceed speculatively — the toPrev chain handles same-contract deps.
 	if taskIdx > 0 && x.vfailed[taskIdx-1].Load() && x.toPrev[taskIdx] == taskIdx-1 {
 		if !x.finalized[taskIdx-1].Load() {
-			<-x.completionCh[taskIdx-1]
+			select {
+			case <-x.completionCh[taskIdx-1]:
+			case <-x.ctx.Done():
+				return
+			}
 		}
 	}
 	if prev := x.toPrev[taskIdx]; prev >= 0 {
-		<-x.execDone[prev]
+		select {
+		case <-x.execDone[prev]:
+		case <-x.ctx.Done():
+			return
+		}
 	}
 	st := x.env.Execute(x.tasks[taskIdx], workerID, x.incarnations[taskIdx],
 		x.taskSenderNonces[taskIdx], x.coinbase, x.waitForTx, x.waitForFinal, true)
