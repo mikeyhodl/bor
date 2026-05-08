@@ -37,9 +37,10 @@ func (s *mockV2State) SetDeferMVWrites(bool)                   {}
 
 type mockV2Task struct{ idx int }
 
-func (t *mockV2Task) Index() int             { return t.idx }
-func (t *mockV2Task) Sender() common.Address { return common.Address{} }
-func (t *mockV2Task) To() *common.Address    { return nil }
+func (t *mockV2Task) Index() int                  { return t.idx }
+func (t *mockV2Task) Sender() common.Address      { return common.Address{} }
+func (t *mockV2Task) To() *common.Address         { return nil }
+func (t *mockV2Task) Authorities() []common.Address { return nil }
 
 type mockV2Env struct {
 	states []*mockV2State
@@ -218,4 +219,119 @@ func TestV2ValidationLoopSerializationBlocksReexec(t *testing.T) {
 		t.Errorf("tx1 re-exec gap %s far exceeds tx0's slow initial %s — unexpected delay",
 			gap, slow)
 	}
+}
+
+// nonceMockTask lets tests override Sender/Authorities per task.
+type nonceMockTask struct {
+	idx     int
+	sender  common.Address
+	auths   []common.Address
+}
+
+func (t *nonceMockTask) Index() int                  { return t.idx }
+func (t *nonceMockTask) Sender() common.Address      { return t.sender }
+func (t *nonceMockTask) To() *common.Address         { return nil }
+func (t *nonceMockTask) Authorities() []common.Address { return t.auths }
+
+// nonceMockEnv reads BaseNonce from a per-address map.
+type nonceMockEnv struct{ nonces map[common.Address]uint64 }
+
+func (e *nonceMockEnv) BaseNonce(addr common.Address) uint64 {
+	return e.nonces[addr]
+}
+func (e *nonceMockEnv) Execute(V2Task, int, int, map[common.Address]uint64, common.Address, func(int), func(int), bool) V2TxState {
+	return nil
+}
+func (e *nonceMockEnv) Recycle(V2TxState) {}
+
+// TestComputeSenderNonces_ExcludesAuthorities pins the production fix for
+// the "nonce too low" sync-time bug seen on bor mainnet shortly after the
+// EIP-7702 sender-chain rewrite landed. computeSenderNonces must NOT
+// pre-compute SenderNonces for any address that appears as an EIP-7702
+// authority anywhere in the block — otherwise an auth that fails at
+// apply time (auth.nonce mismatch with current account nonce, signature
+// recovery failure, etc.) would over-count the address's nonce delta,
+// PDB.GetNonce would short-circuit to that bogus value without recording
+// a read, validation could not invalidate it, and a later legacy tx
+// FROM that address would be rejected with a "nonce too low" error.
+func TestComputeSenderNonces_ExcludesAuthorities(t *testing.T) {
+	addrA := common.HexToAddress("0xA")
+	addrB := common.HexToAddress("0xB")
+	addrC := common.HexToAddress("0xC")
+
+	t.Run("same-sender chain without auth: chain-pos publish", func(t *testing.T) {
+		// Two txs from A, no auth interaction → publish 0 and 1.
+		tasks := []V2Task{
+			&nonceMockTask{idx: 0, sender: addrA},
+			&nonceMockTask{idx: 1, sender: addrA},
+		}
+		env := &nonceMockEnv{nonces: map[common.Address]uint64{addrA: 100}}
+		out := computeSenderNonces(tasks, env)
+		if got := out[0][addrA]; got != 100 {
+			t.Errorf("tx0 SenderNonces[A] = %d, want 100", got)
+		}
+		if got := out[1][addrA]; got != 101 {
+			t.Errorf("tx1 SenderNonces[A] = %d, want 101", got)
+		}
+	})
+
+	t.Run("sender appears as authority in same block: no publish", func(t *testing.T) {
+		// tx0: SetCodeTx, sender=B, auth=[A]. tx1, tx2 sent from A.
+		// A is authority-bumpable → no SenderNonces for tx1/tx2; their
+		// PDB.GetNonce falls through to MVStore which records reads
+		// validation can invalidate.
+		tasks := []V2Task{
+			&nonceMockTask{idx: 0, sender: addrB, auths: []common.Address{addrA}},
+			&nonceMockTask{idx: 1, sender: addrA},
+			&nonceMockTask{idx: 2, sender: addrA},
+		}
+		env := &nonceMockEnv{nonces: map[common.Address]uint64{addrA: 0, addrB: 0}}
+		out := computeSenderNonces(tasks, env)
+		// B is not an authority: still gets nil because chain length is 1.
+		if out[0] != nil {
+			t.Errorf("tx0 SenderNonces = %v, want nil (single-tx sender)", out[0])
+		}
+		// A IS an authority: skip pre-compute even for same-sender chain.
+		if out[1] != nil {
+			t.Errorf("tx1 SenderNonces = %v, want nil (sender is auth)", out[1])
+		}
+		if out[2] != nil {
+			t.Errorf("tx2 SenderNonces = %v, want nil (sender is auth)", out[2])
+		}
+	})
+
+	t.Run("sender appears as authority in LATER tx: still no publish", func(t *testing.T) {
+		// Order matters: A is authorised by tx[2] (which executes last
+		// in tx-index order). The auth-list scan is a prefix-free pass
+		// so A is exempt from publish for tx[0] and tx[1] too — both
+		// MUST observe any nonce bump tx[2] eventually applies.
+		tasks := []V2Task{
+			&nonceMockTask{idx: 0, sender: addrA},
+			&nonceMockTask{idx: 1, sender: addrA},
+			&nonceMockTask{idx: 2, sender: addrC, auths: []common.Address{addrA}},
+		}
+		env := &nonceMockEnv{nonces: map[common.Address]uint64{addrA: 50, addrC: 0}}
+		out := computeSenderNonces(tasks, env)
+		if out[0] != nil || out[1] != nil {
+			t.Errorf("A is auth in tx[2]; want nil for tx[0] and tx[1], got %v / %v", out[0], out[1])
+		}
+	})
+
+	t.Run("non-auth chain plus an unrelated auth: chain still publishes", func(t *testing.T) {
+		// tx[0]: SetCodeTx, sender=B, auth=[C].
+		// tx[1], tx[2]: sent from A (chain length 2). A is not an auth → publish.
+		tasks := []V2Task{
+			&nonceMockTask{idx: 0, sender: addrB, auths: []common.Address{addrC}},
+			&nonceMockTask{idx: 1, sender: addrA},
+			&nonceMockTask{idx: 2, sender: addrA},
+		}
+		env := &nonceMockEnv{nonces: map[common.Address]uint64{addrA: 7}}
+		out := computeSenderNonces(tasks, env)
+		if got := out[1][addrA]; got != 7 {
+			t.Errorf("tx1 SenderNonces[A] = %d, want 7", got)
+		}
+		if got := out[2][addrA]; got != 8 {
+			t.Errorf("tx2 SenderNonces[A] = %d, want 8", got)
+		}
+	})
 }

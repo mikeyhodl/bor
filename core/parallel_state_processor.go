@@ -234,7 +234,9 @@ func (task *ExecutionTask) Settle() {
 // emitting the (deprecated) fee transfer log so receipts match the serial
 // path. Called only when the executing path delayed fee computation.
 func (task *ExecutionTask) applyDelayedFee(coinbaseBalance *uint256.Int) {
-	if task.config.IsLondon(task.blockNumber) {
+	if task.config.IsLondon(task.blockNumber) && task.result.FeeBurnt != nil {
+		// FeeBurnt is only populated for Bor-enabled chains; non-Bor configs
+		// (Ethereum spec tests) implicitly burn the base fee with no credit.
 		task.finalStateDB.AddBalance(task.result.BurntContractAddress,
 			cmath.BigIntToUint256Int(task.result.FeeBurnt), tracing.BalanceChangeTransfer)
 	}
@@ -243,15 +245,18 @@ func (task *ExecutionTask) applyDelayedFee(coinbaseBalance *uint256.Int) {
 	output1 := new(big.Int).SetBytes(task.result.SenderInitBalance.Bytes())
 	output2 := new(big.Int).SetBytes(coinbaseBalance.Bytes())
 	// Deprecated transfer log; do not use going forward — parameters
-	// won't be updated for future EIP1559 changes.
-	AddFeeTransferLog(
-		task.finalStateDB,
-		task.msg.From, task.coinbase,
-		task.result.FeeTipped, task.result.SenderInitBalance,
-		coinbaseBalance.ToBig(),
-		output1.Sub(output1, task.result.FeeTipped),
-		output2.Add(output2, task.result.FeeTipped),
-	)
+	// won't be updated for future EIP1559 changes. Bor-specific; skipped
+	// on non-Bor chain configs.
+	if task.config.Bor != nil {
+		AddFeeTransferLog(
+			task.finalStateDB,
+			task.msg.From, task.coinbase,
+			task.result.FeeTipped, task.result.SenderInitBalance,
+			coinbaseBalance.ToBig(),
+			output1.Sub(output1, task.result.FeeTipped),
+			output2.Add(output2, task.result.FeeTipped),
+		)
+	}
 }
 
 // finaliseFinalState commits pending writes on finalStateDB and returns
@@ -604,6 +609,12 @@ type v2Task struct {
 func (t *v2Task) Index() int             { return t.index }
 func (t *v2Task) Sender() common.Address { return t.msg.From }
 func (t *v2Task) To() *common.Address    { return t.tx.To() }
+func (t *v2Task) Authorities() []common.Address {
+	if t.tx == nil {
+		return nil
+	}
+	return t.tx.SetCodeAuthorities()
+}
 
 // v2Env implements blockstm.V2Env, providing the EVM execution environment.
 type v2Env struct {
@@ -683,8 +694,18 @@ func (e *v2Env) preparePDB(t *v2Task, incarnation int, senderNonces map[common.A
 	pdb.Sender = t.msg.From
 	pdb.WaitForTx = waitForTx
 	pdb.WaitForFinal = waitForFinal
-	pdb.TransferLogFn = sharedTransferLogFn
-	pdb.FeeLogFn = sharedFeeLogFn
+	// Bor-specific transfer/fee logs only on Bor chain configs. Leaving
+	// these nil on Ethereum-spec runs makes the V2 settle path skip the
+	// log emission (see emitTransferLog/emitFeeLog nil-guards) and matches
+	// the serial path's behaviour after the matching gates in
+	// state_processor.go and state_transition.go.
+	if e.chainConfig != nil && e.chainConfig.Bor != nil {
+		pdb.TransferLogFn = sharedTransferLogFn
+		pdb.FeeLogFn = sharedFeeLogFn
+	} else {
+		pdb.TransferLogFn = nil
+		pdb.FeeLogFn = nil
+	}
 	pdb.DeferMVWrites = deferWrites
 	pdb.EnableReadTracking()
 	return pdb
@@ -885,7 +906,18 @@ func newV2Env(base *state.StateDB, store *blockstm.MVStore, bals *blockstm.MVBal
 	sharedSafeBase := state.NewSafeBase(base, poolSize)
 	// Share the trieReader's storage cache with SafeBase so V2 workers get
 	// instant sync.Map hits for slots the prefetcher already warmed.
+	//
+	// The trie reader's cache only sees values it loaded FROM the trie. Any
+	// pre-block writes that live only in stateObject.dirty/pendingStorage —
+	// notably the EIP-4788 BeaconRoots and EIP-2935 ParentBlockHash system
+	// contracts — are invisible to it. Workers reading via SafeBase would hit
+	// a stale zero (from the prefetcher's trie read) instead of the system
+	// call's freshly-written value, and any tx that reads back those slots
+	// (EIP-4788 user-call path checks storage[t%8191] == t) reverts. Overlay
+	// every stateObject's in-memory storage onto the cache so SafeBase serves
+	// post-system-call values.
 	if sc := base.StorageCache(); sc != nil {
+		base.OverlayPendingStorageInto(sc)
 		sharedSafeBase.SharedStorageCache = sc
 	}
 	// Allocate the per-v2Env fallback only when the caller didn't supply a
@@ -1131,8 +1163,31 @@ func (p *V2StateProcessor) finalizeV2Block(block *types.Block, statedb *state.St
 		}
 	}
 
+	// EIP-7685 execution-layer requests (EIP-6110 deposits / EIP-7002
+	// withdrawals / EIP-7251 consolidations). Bor doesn't ship these, but
+	// when running with config.Bor == nil (Ethereum spec tests) the V2
+	// path must mirror state_processor.Process — otherwise CalcRequestsHash
+	// derives an empty-list hash and ValidateState fails the block on
+	// header.RequestsHash mismatch.
+	var requests [][]byte
+	if config.IsPrague(block.Number()) && config.Bor == nil {
+		requests = [][]byte{}
+		if err := ParseDepositLogs(&requests, allLogs, config); err != nil {
+			return nil, fmt.Errorf("failed to parse deposit logs: %w", err)
+		}
+		blockCtx := NewEVMBlockContext(header, p.chain, nil)
+		evm := vm.NewEVM(blockCtx, statedb, config, vm.Config{})
+		if err := ProcessWithdrawalQueue(&requests, evm); err != nil {
+			return nil, fmt.Errorf("failed to process withdrawal queue: %w", err)
+		}
+		if err := ProcessConsolidationQueue(&requests, evm); err != nil {
+			return nil, fmt.Errorf("failed to process consolidation queue: %w", err)
+		}
+	}
+
 	return &ProcessResult{
 		Receipts: receipts,
+		Requests: requests,
 		Logs:     allLogs,
 		GasUsed:  result.GasUsed,
 	}, nil

@@ -53,9 +53,10 @@ type exTask struct {
 	to     *common.Address
 }
 
-func (t *exTask) Index() int             { return t.idx }
-func (t *exTask) Sender() common.Address { return t.sender }
-func (t *exTask) To() *common.Address    { return t.to }
+func (t *exTask) Index() int                  { return t.idx }
+func (t *exTask) Sender() common.Address      { return t.sender }
+func (t *exTask) To() *common.Address         { return t.to }
+func (t *exTask) Authorities() []common.Address { return nil }
 
 // exEnv is a V2Env that runs each task's op script through a
 // ParallelStateDB. The env is intentionally minimal — no EVM, no gas

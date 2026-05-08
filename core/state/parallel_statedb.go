@@ -559,9 +559,16 @@ func (s *ParallelStateDB) Exist(addr common.Address) bool {
 	if s.created[addr] {
 		return true
 	}
-	if s.destructed[addr] {
-		return false
-	}
+	// Note: do NOT short-circuit on s.destructed[addr]. SELFDESTRUCT only
+	// takes effect at tx finalization (cross-tx visibility is published as
+	// a SuicidePath write at FlushToMVStore time and read here via
+	// priorDestructedAt). Within the current tx, the account remains
+	// visible — matching serial StateDB.Exist, whose docstring is explicit
+	// that it "returns true for self-destructed accounts within the current
+	// transaction." A premature false here causes a parent that re-calls a
+	// just-self-destructed callee in the same tx to see no account, which
+	// diverges from the EVM and the serial processor.
+	//
 	// Determine the relative ordering of any prior destruction and any
 	// prior creation. A monotonic "destructed → return false" check is
 	// wrong: a later same-block tx can recreate addr via CREATE2 or by
@@ -827,9 +834,12 @@ func (s *ParallelStateDB) SetCode(addr common.Address, code []byte, reason traci
 // ---------- Storage (versioned) ----------
 
 func (s *ParallelStateDB) GetState(addr common.Address, key common.Hash) common.Hash {
-	if s.destructed[addr] {
-		return common.Hash{}
-	}
+	// Note: do NOT short-circuit on s.destructed[addr]. Storage is wiped
+	// only at tx finalization; within the current tx, slot reads must
+	// continue to return live values (own writes via localStorage, prior-tx
+	// writes via the MVStore, base state otherwise). Serial StateDB.GetState
+	// makes no selfDestructed check for the same reason. Cross-tx visibility
+	// is handled below via priorDestructedAt against SuicidePath writes.
 	if slots, ok := s.localStorage[addr]; ok {
 		if val, ok := slots[key]; ok {
 			return val
@@ -914,8 +924,35 @@ func (s *ParallelStateDB) SetState(addr common.Address, key, value common.Hash) 
 	return prev
 }
 
-// SafeBase diagnostic accessors — read directly from SafeBase for comparison.
+// GetStorageRoot returns the storage trie root used by the EVM CREATE/CREATE2
+// "address-already-in-use" check (see core/vm/evm.go: a non-empty storage
+// root makes the address ineligible for deployment).
+//
+// V2 must mask the base storage root once a prior tx in the block has
+// SELFDESTRUCT'd this account (or marked it suicided in the current tx).
+// Otherwise CREATE2 redeploys onto a destructed-but-still-rooted address
+// fail with "address has existing storage", and the post-state diverges
+// from serial — visible as the spec-test stCallCodes / stCreate2 recreate
+// regressions.
+//
+// Cross-tx destruction is recorded in the MV store at SuicidePath; the
+// priorDestructedAt lookup also records the read so validation can catch
+// a later tx writing SuicidePath after we've returned the un-masked root.
 func (s *ParallelStateDB) GetStorageRoot(addr common.Address) common.Hash {
+	if s.created[addr] {
+		// CREATE / CREATE2 in this tx → storage starts empty.
+		return common.Hash{}
+	}
+	if s.destructed[addr] {
+		// Same-tx SELFDESTRUCT: storage gets wiped at finalisation.
+		return common.Hash{}
+	}
+	if s.priorDestructedAt(addr) >= 0 {
+		// A prior tx in this block destructed addr; storage is gone unless
+		// a later tx already recreated it (caller layer should keep
+		// CreatePath in sync — Exist() handles that).
+		return common.Hash{}
+	}
 	return s.base.GetStorageRoot(addr)
 }
 
@@ -1009,9 +1046,16 @@ func (s *ParallelStateDB) SelfDestruct6780(addr common.Address) (uint256.Int, bo
 	if s.newContract[addr] {
 		return s.SelfDestruct(addr), true
 	}
-	bal := *s.GetBalance(addr)
-	s.SubBalance(addr, &bal, tracing.BalanceDecreaseSelfdestruct)
-	return bal, false
+	// EIP-6780: SELFDESTRUCT on a non-same-tx-created contract MUST NOT
+	// touch balances here — the EVM opcode handler (opSelfdestruct6780)
+	// already performed SubBalance(addr) + AddBalance(beneficiary) before
+	// invoking us. Serial StateDB.SelfDestruct6780 is a pure read in this
+	// branch for the same reason. Mirroring that contract is the only way
+	// the self-beneficiary case (CALLCODE → callee SELFDESTRUCT(caller))
+	// preserves the contract's balance: SubBalance(addr) + AddBalance(addr)
+	// nets to zero, but a third SubBalance here drains the contract.
+	// Found via spec-tests stCallCodes/...SuicideEnd.
+	return *s.GetBalance(addr), false
 }
 
 // ---------- Account creation ----------

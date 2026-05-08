@@ -78,9 +78,18 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		random = &header.MixDigest
 	}
 
+	// Bor emits a synthetic "transfer log" on every value movement (see
+	// core/bor_fee_log.go). On non-Bor chain configs (e.g. when running
+	// Ethereum execution-spec-tests) those logs aren't part of the protocol
+	// and pollute the block bloom, so swap Transfer for the no-log variant.
+	transferFn := Transfer
+	if cfg := chain.Config(); cfg == nil || cfg.Bor == nil {
+		transferFn = EthereumTransfer
+	}
+
 	return vm.BlockContext{
 		CanTransfer: CanTransfer,
-		Transfer:    Transfer,
+		Transfer:    transferFn,
 		GetHash:     GetHashFn(header, chain),
 		Coinbase:    beneficiary,
 		BlockNumber: new(big.Int).Set(header.Number),
@@ -91,6 +100,14 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 		GasLimit:    header.GasLimit,
 		Random:      random,
 	}
+}
+
+// EthereumTransfer subtracts amount from sender and adds it to recipient,
+// matching upstream go-ethereum semantics — no Bor transfer-log emission.
+// Used by NewEVMBlockContext when ChainConfig.Bor is nil.
+func EthereumTransfer(db vm.StateDB, sender, recipient common.Address, amount *uint256.Int) {
+	db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
+	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }
 
 // NewEVMTxContext creates a new transaction context for a single transaction.

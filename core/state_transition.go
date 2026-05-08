@@ -617,15 +617,21 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 	amount := new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip)
 
 	var burnAmount *big.Int
-
 	var burntContractAddress common.Address
 
 	if rules.IsLondon {
-		burntContractAddress = common.HexToAddress(st.evm.ChainConfig().Bor.CalculateBurntContract(st.evm.Context.BlockNumber.Uint64()))
-		burnAmount = new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-
-		if !st.noFeeBurnAndTip {
-			st.state.AddBalance(burntContractAddress, cmath.BigIntToUint256Int(burnAmount), tracing.BalanceChangeTransfer)
+		// Bor-specific behavior: redirect the burned base fee to a configured
+		// "burnt contract" (a dead address on bor mainnet/amoy). On non-Bor
+		// chain configs (Bor == nil), no credit happens — the base fee is
+		// implicitly burned the upstream go-ethereum way, matching Ethereum
+		// mainnet semantics. Without the nil-guard, Ethereum-spec test
+		// fixtures with Bor == nil panic here.
+		if bor := st.evm.ChainConfig().Bor; bor != nil {
+			burntContractAddress = common.HexToAddress(bor.CalculateBurntContract(st.evm.Context.BlockNumber.Uint64()))
+			burnAmount = new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
+			if !st.noFeeBurnAndTip {
+				st.state.AddBalance(burntContractAddress, cmath.BigIntToUint256Int(burnAmount), tracing.BalanceChangeTransfer)
+			}
 		}
 	}
 
@@ -637,7 +643,9 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 			st.evm.AccessEvents.AddAccount(st.evm.Context.Coinbase, true, math.MaxUint64)
 		}
 
-		if !st.noFeeLog {
+		if !st.noFeeLog && st.evm.ChainConfig().Bor != nil {
+			// Bor-specific fee transfer log; non-Bor chains (Ethereum spec)
+			// don't emit it.
 			output1 := new(big.Int).SetBytes(input1.Bytes())
 			output2 := new(big.Int).SetBytes(input2.Bytes())
 

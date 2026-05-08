@@ -929,6 +929,14 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 	if result.parallel && result.err != nil {
 		log.Warn("Parallel state processor failed", "number", block.NumberU64(), "hash", block.Hash(), "err", result.err)
 		blockExecutionParallelErrorCounter.Inc(1)
+		// Stop the failed V2 statedb's prefetcher before discarding the
+		// result. The V2 goroutine only stops it on ctx cancellation, so a
+		// V2-only error path (panic, ApplyMessage error, validate mismatch)
+		// would otherwise leave trie prefetch work running across the
+		// caller's commit — exactly the stale-layer scenario this code is
+		// trying to avoid. Applies in both fallback (processorCount==2) and
+		// enforce (processorCount==1) modes.
+		result.statedb.StopPrefetcher()
 		// If the parallel processor failed, we will fallback to the serial processor if enabled
 		if processorCount == 2 {
 			result = <-resultChan

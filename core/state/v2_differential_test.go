@@ -575,10 +575,12 @@ func diffScenarios() []scenario {
 			probes: []probe{{kind: "balance", addr: alice}, {kind: "exist", addr: alice}},
 		},
 		// Follow opSelfdestruct6780's EVM flow: SubBalance, AddBalance to beneficiary,
-		// then SelfDestruct6780. The bare SelfDestruct6780 method has drifting
-		// semantics between StateDB and ParallelStateDB for existing contracts
-		// (PDB's method drains balance; StateDB's does not). The EVM wrapper
-		// normalises this by always pre-draining, so tests must mirror that.
+		// then SelfDestruct6780. SelfDestruct6780 itself is a no-op (balance-wise)
+		// for existing contracts on both StateDB and ParallelStateDB — the EVM
+		// opcode handler does the SubBalance + AddBalance pair before invoking it.
+		// (PDB used to drain balance on its own here, double-charging the
+		// SubBalance and zeroing the contract on the self-beneficiary case
+		// from spec-tests stCallCodes/...SuicideEnd; fixed.)
 		{
 			name: "selfdestruct6780_new_contract",
 			ops: []pdbOp{

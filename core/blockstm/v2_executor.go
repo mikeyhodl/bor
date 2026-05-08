@@ -18,6 +18,12 @@ type V2Task interface {
 	Index() int
 	Sender() common.Address
 	To() *common.Address // nil for contract creation
+	// Authorities returns the unique EIP-7702 authorities of this tx
+	// (signers in the SetCode auth list). Empty for non-SetCodeTx.
+	// V2 uses these to maintain per-address nonce deltas across the
+	// block, since each authority's nonce is bumped at apply time even
+	// though it isn't the tx sender.
+	Authorities() []common.Address
 }
 
 // InFlightTaskMultiplier sets the size of two coupled buffers as a
@@ -185,21 +191,52 @@ func newV2ExecCtx(tasks []V2Task, env V2Env, coinbase common.Address,
 	return x
 }
 
+// computeSenderNonces returns per-task per-sender pre-computed nonces for
+// same-sender chains (length >= 2). Tasks whose sender appears in any
+// tx's EIP-7702 auth list — whether earlier or later in the block — are
+// excluded from the pre-compute and fall through to PDB.GetNonce →
+// MVStore. We can't tell at scheduling time whether an auth-list entry
+// will be applied (apply-time check requires auth.nonce == account.nonce
+// and a valid signature on the current chainID), so any pre-bump we put
+// here would be wrong for failed auths and a SenderNonces hit
+// short-circuits PDB.GetNonce without recording a read — meaning
+// validation can never invalidate the stale value. The MVStore fallback
+// records reads, so validation re-executes the tx once an earlier
+// auth-bump (or its absence) lands in the store.
+//
+// Tasks with no chain and no auth-list interaction get nil — same as
+// the original optimisation, so PDB.GetNonce reads the base nonce
+// directly.
+func computeSenderNonces(tasks []V2Task, env V2Env) []map[common.Address]uint64 {
+	// Any address that is an authority in any tx may have its nonce
+	// dynamically bumped by the auth-list applier. Don't pre-compute
+	// nonces for those addresses — let the MVStore-aware path handle
+	// the dependency.
+	var authoritySet map[common.Address]struct{}
+	for i := range tasks {
+		for _, auth := range tasks[i].Authorities() {
+			if authoritySet == nil {
+				authoritySet = make(map[common.Address]struct{})
+			}
+			authoritySet[auth] = struct{}{}
+		}
+	}
+
+	chains := groupBySender(tasks, env)
+	out := make([]map[common.Address]uint64, len(tasks))
+	for sender, c := range chains {
+		if _, isAuth := authoritySet[sender]; isAuth {
+			continue
+		}
+		assignSenderNonces(out, sender, c)
+	}
+	return out
+}
+
 // senderChain is the per-sender precomputed nonce chain.
 type senderChain struct {
 	baseNonce uint64
 	taskIdxs  []int
-}
-
-// computeSenderNonces returns per-task per-sender pre-computed nonces for
-// same-sender chains (length >= 2). Tasks with no chain get nil.
-func computeSenderNonces(tasks []V2Task, env V2Env) []map[common.Address]uint64 {
-	chains := groupBySender(tasks, env)
-	out := make([]map[common.Address]uint64, len(tasks))
-	for sender, c := range chains {
-		assignSenderNonces(out, sender, c)
-	}
-	return out
 }
 
 func groupBySender(tasks []V2Task, env V2Env) map[common.Address]*senderChain {

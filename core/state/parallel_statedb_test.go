@@ -1413,15 +1413,54 @@ func TestPDB_TryEmitTransferAt_NoIntermediateLogs(t *testing.T) {
 // Exist — all three return paths
 // ---------------------------------------------------------------------------
 
-// TestPDB_Exist_DestructedReturnsFalse pins line 793: a destructed
-// address must return false from Exist.
-func TestPDB_Exist_DestructedReturnsFalse(t *testing.T) {
+// TestPDB_Exist_DestructedNoBaseReturnsFalse exercises the fall-through
+// path for Exist after a same-tx SelfDestruct on an address that has no
+// backing presence: not created in this tx, not in base, balance zeroed
+// by the SelfDestruct itself, and no prior-tx destruct/create record in
+// the MVStore. Exist must return false because the address truly does
+// not exist anywhere — NOT because s.destructed[addr] short-circuits the
+// read. EVM SELFDESTRUCT defers actual deletion to tx finalization, so a
+// monotonic "destructed → false" check would diverge from serial within
+// the current tx (see TestPDB_Exist_BaseAddrSelfDestructedInTxReturnsTrue
+// for the case that pins the corrected within-tx semantics).
+func TestPDB_Exist_DestructedNoBaseReturnsFalse(t *testing.T) {
 	pdb, _, _ := newTestPDB(t, 0)
 	addr := common.HexToAddress("0xabcd")
 	pdb.AddBalance(addr, uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 	pdb.SelfDestruct(addr)
 	if pdb.Exist(addr) {
-		t.Fatal("Exist on destructed addr must return false")
+		t.Fatal("Exist on a destructed address with no base/created/balance presence must return false")
+	}
+}
+
+// TestPDB_Exist_BaseAddrSelfDestructedInTxReturnsTrue pins the within-tx
+// SELFDESTRUCT visibility invariant: a contract that exists in the base
+// state and is self-destructed by the current tx must still report as
+// existing, matching serial StateDB.Exist (statedb.go:705-709, whose
+// docstring is explicit: "returns true for self-destructed accounts
+// within the current transaction"). The destruction tombstone is
+// published cross-tx via the SuicidePath write at FlushToMVStore, where
+// later txs in the same block see it through priorDestructedAt — that
+// path is independent of this same-tx assertion. A premature false here
+// causes a parent that re-calls a just-self-destructed callee in the
+// same tx to see no account, which diverges from the EVM and breaks
+// gas accounting (CALL value-transfer surcharge via Empty).
+func TestPDB_Exist_BaseAddrSelfDestructedInTxReturnsTrue(t *testing.T) {
+	sdb, _ := newDiffStateDB(t)
+	addr := common.HexToAddress("0xabcd")
+	// Pre-existing contract in base: code + balance + nonce make this a
+	// realistic self-destruct target rather than a phantom address.
+	sdb.SetCode(addr, []byte{0x60, 0x40}, tracing.CodeChangeUnspecified)
+	sdb.AddBalance(addr, uint256.NewInt(100), tracing.BalanceChangeUnspecified)
+	sdb.SetNonce(addr, 1, tracing.NonceChangeUnspecified)
+
+	store := blockstm.NewMVStore()
+	bals := blockstm.NewMVBalanceStore()
+	pdb := NewParallelStateDB(0, NewSafeBase(sdb, 2), store, bals)
+
+	pdb.SelfDestruct(addr)
+	if !pdb.Exist(addr) {
+		t.Fatal("Exist on a base-resident address self-destructed in the current tx must return true (within-tx visibility)")
 	}
 }
 

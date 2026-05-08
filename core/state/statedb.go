@@ -349,6 +349,32 @@ func (s *StateDB) StorageCache() *sync.Map {
 	return findStorageCache(s.reader)
 }
 
+// OverlayPendingStorageInto walks every live stateObject and writes its
+// in-memory pending+dirty storage values into target, keyed by stateKey{addr,
+// slot}. Use it to repair a SharedStorageCache that was populated from raw
+// trie reads BEFORE pre-block writes (EIP-4788/EIP-2935 system contracts,
+// DAO fork, etc.) landed in dirty/pending storage. Without this overlay,
+// SafeBase serves the stale trie value (zero, for previously-unwritten
+// system-contract slots) and downstream V2 workers see no system-call effect.
+func (s *StateDB) OverlayPendingStorageInto(target *sync.Map) {
+	if target == nil {
+		return
+	}
+	for addr, obj := range s.stateObjects {
+		if obj == nil {
+			continue
+		}
+		obj.storageMutex.Lock()
+		for slot, val := range obj.pendingStorage {
+			target.Store(stateKey{addr: addr, slot: slot}, val)
+		}
+		for slot, val := range obj.dirtyStorage {
+			target.Store(stateKey{addr: addr, slot: slot}, val)
+		}
+		obj.storageMutex.Unlock()
+	}
+}
+
 func findStorageCache(r any) *sync.Map {
 	switch v := r.(type) {
 	case *reader:
