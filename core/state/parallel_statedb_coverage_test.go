@@ -137,7 +137,7 @@ func TestPDB_MarkAndCleanupEstimate(t *testing.T) {
 	}
 	// addr2 never re-written: CleanupEstimate must have removed it.
 	key2 := blockstm.NewStateKey(addr2, common.HexToHash("0x2"))
-	if _, found := store.Read(key2, 10); found {
+	if _, _, _, found, _ := store.ReadVersionFull(key2, 10); found {
 		t.Fatal("CleanupEstimate did not remove stale estimate entry")
 	}
 
@@ -208,7 +208,7 @@ func TestPDB_SetDeferMVWrites(t *testing.T) {
 	pdb.SetCode(common.HexToAddress("0x1"), []byte{0x60}, tracing.CodeChangeUnspecified)
 	// Deferred: write must not land in MVStore until FlushToMVStore runs.
 	key := blockstm.NewSubpathKey(common.HexToAddress("0x1"), CodePath)
-	if _, found := store.Read(key, 10); found {
+	if _, _, _, found, _ := store.ReadVersionFull(key, 10); found {
 		t.Fatal("DeferMVWrites=true: code write landed immediately")
 	}
 }
@@ -903,7 +903,7 @@ func TestHandleEstimate_WaitsThenDeletes(t *testing.T) {
 		t.Fatal("handleEstimate(Incarnation=1, est): expected true (retry loop)")
 	}
 	// Entry must have been deleted since it was still estimate after wait.
-	if _, found := store.Read(k, 10); found {
+	if _, _, _, found, _ := store.ReadVersionFull(k, 10); found {
 		t.Fatal("handleEstimate did not delete the lingering estimate entry")
 	}
 }
@@ -1082,7 +1082,7 @@ func TestPDB_CreateAccount_WritesTrueValue(t *testing.T) {
 	pdb.CreateAccount(addr)
 
 	createKey := blockstm.NewSubpathKey(addr, CreatePath)
-	val, found := store.Read(createKey, 10)
+	val, _, _, found, _ := store.ReadVersionFull(createKey, 10)
 	if !found {
 		t.Fatal("CreateAccount did not write CreatePath to MVStore (DeferMVWrites=false)")
 	}

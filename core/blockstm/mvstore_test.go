@@ -8,32 +8,6 @@ import (
 
 func mvKey(addr byte) Key { return NewAddressKey(common.Address{addr}) }
 
-// TestMVStore_WriteRead covers the happy path: write a value at txIdx=2 and
-// observe it from a later reader. Readers before the writer see nothing.
-func TestMVStore_WriteRead(t *testing.T) {
-	s := NewMVStore()
-	k := mvKey(1)
-
-	if _, found := s.Read(k, 10); found {
-		t.Fatalf("expected no entry before any write")
-	}
-	s.WriteInc(k, 2, 0, uint64(42))
-
-	v, found := s.Read(k, 10)
-	if !found || v.(uint64) != 42 {
-		t.Fatalf("Read at 10: got (%v, %v), want (42, true)", v, found)
-	}
-
-	// Reader at txIdx==writer cannot see its own write.
-	if _, found := s.Read(k, 2); found {
-		t.Fatalf("reader at writer's txIdx must not see the write")
-	}
-	// Reader at txIdx<writer sees nothing.
-	if _, found := s.Read(k, 1); found {
-		t.Fatalf("reader before writer must see nothing")
-	}
-}
-
 // TestMVStore_WriteInc verifies incarnation tracking: the latest write at
 // the same txIdx replaces the prior version in place.
 func TestMVStore_WriteInc(t *testing.T) {
@@ -112,7 +86,7 @@ func TestMVStore_EstimateLifecycle(t *testing.T) {
 	if !found || v.(uint64) != 11 || writer != 2 || inc != 1 {
 		t.Fatalf("keep after cleanup: got (%v, %d, %d, %v), want (11,2,1,true)", v, writer, inc, found)
 	}
-	if _, found := s.Read(drop, 5); found {
+	if _, _, _, found, _ := s.ReadVersionFull(drop, 5); found {
 		t.Fatalf("drop after cleanup: expected entry removed (was still estimate)")
 	}
 	// IsEstimate on missing entry is false.
@@ -128,9 +102,6 @@ func TestMVStore_BloomFastPath(t *testing.T) {
 	s.WriteInc(mvKey(1), 2, 0, uint64(1))
 
 	// Different key: bloom filter should miss.
-	if _, found := s.Read(mvKey(200), 10); found {
-		t.Fatalf("Read on unwritten key returned found=true")
-	}
 	if _, _, _, found, _ := s.ReadVersionFull(mvKey(200), 10); found {
 		t.Fatalf("ReadVersionFull on unwritten key returned found=true")
 	}

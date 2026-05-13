@@ -298,7 +298,6 @@ func (s *ParallelStateDB) readStoreWait(key blockstm.Key) (interface{}, int, int
 // scenario), false if the caller should fall through to the base state
 // (first execution / no WaitForFinal).
 func (s *ParallelStateDB) handleEstimate(key blockstm.Key, writerIdx int) bool {
-	s.store.Estimates.Add(1)
 	if s.Incarnation == 0 || s.WaitForFinal == nil {
 		return false
 	}

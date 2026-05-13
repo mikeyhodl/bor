@@ -1317,7 +1317,7 @@ func TestPDB_FlushToMVStore_CreatesAccount(t *testing.T) {
 	pdb.FlushToMVStore()
 
 	createKey := blockstm.NewSubpathKey(addr, CreatePath)
-	if _, found := store.Read(createKey, 10); !found {
+	if _, _, _, found, _ := store.ReadVersionFull(createKey, 10); !found {
 		t.Fatal("FlushToMVStore did not write the create key")
 	}
 }
@@ -1332,7 +1332,7 @@ func TestPDB_CreateAccount_WritesMVStore(t *testing.T) {
 	pdb.CreateAccount(addr)
 
 	createKey := blockstm.NewSubpathKey(addr, CreatePath)
-	if _, found := store.Read(createKey, 10); !found {
+	if _, _, _, found, _ := store.ReadVersionFull(createKey, 10); !found {
 		t.Fatal("CreateAccount did not write to MVStore (DeferMVWrites=false)")
 	}
 }

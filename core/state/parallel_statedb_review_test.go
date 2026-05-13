@@ -179,7 +179,7 @@ func TestPDB_FlushToMVStore_SkipsWhenPanicked(t *testing.T) {
 		blockstm.NewSubpathKey(addr, CreatePath), // CreateAccount via SetCode
 	}
 	for _, k := range keys {
-		if val, found := store.Read(k, 8); found {
+		if val, _, _, found, _ := store.ReadVersionFull(k, 8); found {
 			t.Fatalf("MVStore polluted with key %x: %v", k, val)
 		}
 	}
@@ -200,7 +200,7 @@ func TestPDB_FlushToMVStore_NotPanickedStillFlushes(t *testing.T) {
 
 	pdb.FlushToMVStore()
 
-	if _, found := store.Read(blockstm.NewSubpathKey(addr, NoncePath), 8); !found {
+	if _, _, _, found, _ := store.ReadVersionFull(blockstm.NewSubpathKey(addr, NoncePath), 8); !found {
 		t.Fatal("expected nonce flushed to MVStore")
 	}
 	if _, _, found := bals.GetTxDelta(addr, 7); !found {

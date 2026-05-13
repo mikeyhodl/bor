@@ -3,7 +3,6 @@ package blockstm
 import (
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -45,9 +44,8 @@ type mvStoreShard struct {
 }
 
 type MVStore struct {
-	shards    [mvStoreShards]mvStoreShard
-	bloom     writeBloom   // lock-free bloom filter for fast read misses
-	Estimates atomic.Int64 // count of estimate-wait spins (diagnostic)
+	shards [mvStoreShards]mvStoreShard
+	bloom  writeBloom // lock-free bloom filter for fast read misses
 }
 
 func NewMVStore() *MVStore {
@@ -94,24 +92,6 @@ func (s *MVStore) Delete(k Key, txIdx int) {
 		sh.data[k] = entries
 	}
 	sh.mu.Unlock()
-}
-
-// Read returns the latest value written by a tx before txIdx.
-func (s *MVStore) Read(k Key, txIdx int) (any, bool) {
-	if !s.bloom.mayContain(k) {
-		return nil, false
-	}
-	sh := s.shard(k)
-	sh.mu.RLock()
-	entries := sh.data[k]
-	pos := sort.Search(len(entries), func(i int) bool { return entries[i].txIdx >= txIdx })
-	if pos > 0 {
-		v := entries[pos-1].value
-		sh.mu.RUnlock()
-		return v, true
-	}
-	sh.mu.RUnlock()
-	return nil, false
 }
 
 // ReadVersionFull returns the latest value, writer info, AND the estimate
