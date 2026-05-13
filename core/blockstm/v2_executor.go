@@ -542,10 +542,15 @@ func (x *v2ExecCtx) finalizePass(i int) {
 func (x *v2ExecCtx) dispatchReexec(i int) chan struct{} {
 	x.vfailCount.Add(1)
 	x.vfailIdxs = append(x.vfailIdxs, i)
-	if cat := x.states[i].ValidateCategory(); cat != "" {
-		x.vfailCatsMu.Lock()
-		x.vfailCats[cat]++
-		x.vfailCatsMu.Unlock()
+	// x.states[i] can be nil if the worker returned early on ctx cancellation
+	// (lines 410/418) before populating it. The non-deterministic select in
+	// validateOne may still pick execDone[i] over ctx.Done(), routing here.
+	if x.states[i] != nil {
+		if cat := x.states[i].ValidateCategory(); cat != "" {
+			x.vfailCatsMu.Lock()
+			x.vfailCats[cat]++
+			x.vfailCatsMu.Unlock()
+		}
 	}
 	var oldWriteKeys []Key
 	var oldBalAddrs []common.Address

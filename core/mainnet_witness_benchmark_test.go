@@ -547,6 +547,7 @@ func processSerial(pb *preparedBlock, config *params.ChainConfig, engine consens
 func processParallel(pb *preparedBlock, config *params.ChainConfig, engine consensus.Engine, numProcs int) (*ProcessResult, error) {
 	db := pb.baseState.Copy()
 	bc := &BlockChain{
+		chainConfig:                  config,
 		hc:                           &HeaderChain{config: config, chainDb: pb.memdb, headerCache: pb.headerCache, engine: engine},
 		parallelSpeculativeProcesses: numProcs,
 	}
@@ -562,7 +563,8 @@ func processParallel(pb *preparedBlock, config *params.ChainConfig, engine conse
 func processV2(pb *preparedBlock, config *params.ChainConfig, engine consensus.Engine, numWorkers int) (*ProcessResult, *state.StateDB, error) {
 	db := pb.baseState.Copy()
 	bc := &BlockChain{
-		hc: &HeaderChain{config: config, chainDb: pb.memdb, headerCache: pb.headerCache, engine: engine},
+		chainConfig: config,
+		hc:          &HeaderChain{config: config, chainDb: pb.memdb, headerCache: pb.headerCache, engine: engine},
 	}
 	hc := &benchHeaderChain{
 		config:      config,
@@ -648,6 +650,7 @@ func executeStatelessParallel(config *params.ChainConfig, block *types.Block, wi
 	}
 
 	bc := &BlockChain{
+		chainConfig:                  config,
 		hc:                           &HeaderChain{config: config, chainDb: memdb, headerCache: hc.headerCache, engine: engine},
 		parallelSpeculativeProcesses: numProcs,
 	}
@@ -1232,6 +1235,7 @@ func processV2Parallel(pb *preparedBlock, config *params.ChainConfig, engine con
 
 	signer := types.MakeSigner(config, pb.block.Number(), pb.block.Time())
 	blockContext := NewEVMBlockContext(pb.block.Header(), &BlockChain{
+		chainConfig: config,
 		hc: &HeaderChain{config: config, chainDb: pb.memdb,
 			headerCache: pb.headerCache, engine: engine},
 	}, &pb.author)
@@ -1393,6 +1397,7 @@ func TestV2BlockSTMWorkerScaling(t *testing.T) {
 		store := blockstm.NewMVStore()
 		bals := blockstm.NewMVBalanceStore()
 		blockContext := NewEVMBlockContext(bd.block.Header(), &BlockChain{
+			chainConfig: config,
 			hc: &HeaderChain{config: config, chainDb: v2Memdb,
 				headerCache: lru.NewCache[common.Hash, *types.Header](256), engine: engine},
 		}, &author)
@@ -1476,6 +1481,7 @@ func TestV2ChainWaitDiagnostic(t *testing.T) {
 		store := blockstm.NewMVStore()
 		bals := blockstm.NewMVBalanceStore()
 		blockCtx := NewEVMBlockContext(bd.block.Header(), &BlockChain{
+			chainConfig: config,
 			hc: &HeaderChain{config: config, chainDb: v2Memdb,
 				headerCache: lru.NewCache[common.Hash, *types.Header](256), engine: engine},
 		}, &author)
@@ -1669,7 +1675,8 @@ func processV2BlockSTMWithWitness(pb *preparedBlock, config *params.ChainConfig,
 	}
 	db.SetWitness(w)
 	bc := &BlockChain{
-		hc: &HeaderChain{config: config, chainDb: pb.memdb, headerCache: pb.headerCache, engine: engine},
+		chainConfig: config,
+		hc:          &HeaderChain{config: config, chainDb: pb.memdb, headerCache: pb.headerCache, engine: engine},
 	}
 	hc := &benchHeaderChain{
 		config:      config,
@@ -1722,6 +1729,7 @@ func runV2BlockSTMConsistency(t *testing.T, blocks []testBlockData, diskdb ethdb
 		// Build tasks
 		signer := types.MakeSigner(config, bd.block.Number(), bd.block.Time())
 		blockContext := NewEVMBlockContext(bd.block.Header(), &BlockChain{
+			chainConfig: config,
 			hc: &HeaderChain{config: config, chainDb: finalMemdb,
 				headerCache: lru.NewCache[common.Hash, *types.Header](256), engine: engine},
 		}, &author)

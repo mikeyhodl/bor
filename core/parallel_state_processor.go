@@ -786,7 +786,20 @@ func ExecuteV2BlockSTM(
 	finalDB *state.StateDB,
 	conflictAddrs map[common.Address]bool,
 ) *V2ExecutionResult {
-	recoverTaskMessages(tasks, chainConfig, blockCtx)
+	// Surface signature-recovery failures via ExecErrIdx/ExecErr — the
+	// production caller (V2StateProcessor.Process) aborts the block on
+	// non-negative ExecErrIdx, matching the serial path. Without this short-
+	// circuit, a nil Msg would slip into applyMessage and trigger a recovered
+	// panic with a less specific error.
+	if idx, err := recoverTaskMessages(tasks, chainConfig, blockCtx); err != nil {
+		return &V2ExecutionResult{
+			Pdbs:              make([]*state.ParallelStateDB, len(tasks)),
+			PanickedIdx:       -1,
+			ExecErrIdx:        idx,
+			ExecErr:           err,
+			V2ExecutionResult: &blockstm.V2ExecutionResult{},
+		}
+	}
 
 	// Without this, the SafeBase pool copies share base.reader, and
 	// concurrent worker goroutines race on the trie's internal resolve
@@ -865,7 +878,9 @@ func ExecuteV2BlockSTM(
 
 // recoverTaskMessages performs parallel signature recovery for any task
 // whose Msg is nil. No-op if all tasks already have pre-computed messages.
-func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockCtx vm.BlockContext) {
+// On failure, returns the lowest task index that failed and the error from
+// TransactionToMessage; (-1, nil) on success.
+func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockCtx vm.BlockContext) (int, error) {
 	needRecovery := false
 	for i := range tasks {
 		if tasks[i].Msg == nil {
@@ -874,11 +889,16 @@ func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockC
 		}
 	}
 	if !needRecovery {
-		return
+		return -1, nil
 	}
 	signer := types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
 	baseFee := blockCtx.BaseFee
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		errMu    sync.Mutex
+		firstIdx = -1
+		firstErr error
+	)
 	for i := range tasks {
 		if tasks[i].Msg != nil {
 			continue
@@ -887,11 +907,21 @@ func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockC
 		idx := i
 		go func() {
 			defer wg.Done()
-			msg, _ := TransactionToMessage(tasks[idx].Tx, signer, baseFee)
+			msg, err := TransactionToMessage(tasks[idx].Tx, signer, baseFee)
+			if err != nil {
+				errMu.Lock()
+				if firstErr == nil || idx < firstIdx {
+					firstIdx = idx
+					firstErr = err
+				}
+				errMu.Unlock()
+				return
+			}
 			tasks[idx].Msg = msg
 		}()
 	}
 	wg.Wait()
+	return firstIdx, firstErr
 }
 
 // newV2Env builds a v2Env wired up with the shared SafeBase, jumpDest cache,
