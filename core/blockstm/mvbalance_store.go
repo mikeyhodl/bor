@@ -30,9 +30,8 @@ type BalanceDelta struct {
 }
 
 type mvBalanceShard struct {
-	mu      sync.RWMutex
-	data    map[common.Address][]BalanceDelta
-	version map[common.Address]uint64 // incremented on every write, for fast validation
+	mu   sync.RWMutex
+	data map[common.Address][]BalanceDelta
 }
 
 type MVBalanceStore struct {
@@ -43,14 +42,12 @@ func NewMVBalanceStore() *MVBalanceStore {
 	s := &MVBalanceStore{}
 	for i := range s.shards {
 		s.shards[i].data = make(map[common.Address][]BalanceDelta, initialMVBalanceShardCap)
-		s.shards[i].version = make(map[common.Address]uint64, initialMVBalanceShardCap)
 	}
 	return s
 }
 
 func (s *MVBalanceStore) shard(addr common.Address) *mvBalanceShard {
-	h := uint(addr[0])<<8 | uint(addr[1])
-	return &s.shards[h%mvBalanceShards]
+	return &s.shards[addrShardIndex(addr[:])%mvBalanceShards]
 }
 
 // WriteDelta accumulates add/sub into the (addr, txIdx) entry, creating it
@@ -78,17 +75,7 @@ func (s *MVBalanceStore) WriteDelta(addr common.Address, txIdx int, add, sub *ui
 		entries[pos] = BalanceDelta{TxIdx: txIdx, Add: a, Sub: su}
 		sh.data[addr] = entries
 	}
-	sh.version[addr]++
 	sh.mu.Unlock()
-}
-
-// Version returns the current version counter for an address (for fast validation).
-func (s *MVBalanceStore) Version(addr common.Address) uint64 {
-	sh := s.shard(addr)
-	sh.mu.RLock()
-	v := sh.version[addr]
-	sh.mu.RUnlock()
-	return v
 }
 
 // ReadDelta returns accumulated (add, sub) from entries before txIdx.
@@ -140,10 +127,6 @@ func (s *MVBalanceStore) GetTxDelta(addr common.Address, txIdx int) (add, sub ui
 // ZeroDelta resets the delta for txIdx to zero but keeps the entry.
 // This allows LastWriter to still find the txIdx (for waitForTx during
 // parallel re-execution), while WriteDelta accumulates correctly from zero.
-//
-// Version is only bumped when an entry actually existed for txIdx —
-// no-op zeroing on an absent entry must not invalidate any version-based
-// caches downstream.
 func (s *MVBalanceStore) ZeroDelta(txIdx int, addrs []common.Address) {
 	for _, addr := range addrs {
 		sh := s.shard(addr)
@@ -153,7 +136,6 @@ func (s *MVBalanceStore) ZeroDelta(txIdx int, addrs []common.Address) {
 		if pos < len(entries) && entries[pos].TxIdx == txIdx {
 			entries[pos].Add.Clear()
 			entries[pos].Sub.Clear()
-			sh.version[addr]++
 		}
 		sh.mu.Unlock()
 	}
@@ -168,7 +150,6 @@ func (s *MVBalanceStore) DeleteSingle(addr common.Address, txIdx int) {
 	if pos < len(entries) && entries[pos].TxIdx == txIdx {
 		entries = append(entries[:pos], entries[pos+1:]...)
 		sh.data[addr] = entries
-		sh.version[addr]++
 	}
 	sh.mu.Unlock()
 }

@@ -4,6 +4,8 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // ---------------------------------------------------------------------------
@@ -57,8 +59,7 @@ func NewMVStore() *MVStore {
 }
 
 func (s *MVStore) shard(k Key) *mvStoreShard {
-	h := uint(k[0])<<8 | uint(k[1])
-	return &s.shards[h%mvStoreShards]
+	return &s.shards[addrShardIndex(k[:common.AddressLength])%mvStoreShards]
 }
 
 func (s *MVStore) WriteInc(k Key, txIdx, incarnation int, val any) {

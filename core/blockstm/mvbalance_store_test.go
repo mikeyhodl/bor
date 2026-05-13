@@ -132,73 +132,6 @@ func TestMVBalanceStore_DeleteSingle(t *testing.T) {
 	s.DeleteSingle(addr, 99)
 }
 
-// TestMVBalanceStore_Version increments on every write-like mutation.
-func TestMVBalanceStore_Version(t *testing.T) {
-	s := NewMVBalanceStore()
-	addr := mvBalAddr(1)
-
-	if got := s.Version(addr); got != 0 {
-		t.Fatalf("initial Version: got %d, want 0", got)
-	}
-	s.WriteDelta(addr, 1, u(1), u(0))
-	v1 := s.Version(addr)
-	s.WriteDelta(addr, 2, u(1), u(0))
-	v2 := s.Version(addr)
-	if v2 <= v1 {
-		t.Fatalf("Version did not increment on write: %d → %d", v1, v2)
-	}
-	s.ZeroDelta(1, []common.Address{addr})
-	v3 := s.Version(addr)
-	if v3 <= v2 {
-		t.Fatalf("Version did not increment on ZeroDelta: %d → %d", v2, v3)
-	}
-}
-
-// TestMVBalanceStore_ZeroDelta_AbsentEntryNoVersionBump pins the fix for
-// the spurious-version-bump bug: when ZeroDelta is called on a (txIdx, addr)
-// pair that has no entry, it must be a true no-op — including no version
-// increment, since downstream cache invalidation keys on Version().
-func TestMVBalanceStore_ZeroDelta_AbsentEntryNoVersionBump(t *testing.T) {
-	s := NewMVBalanceStore()
-	addr := mvBalAddr(1)
-	s.WriteDelta(addr, 7, u(5), u(0))
-	v0 := s.Version(addr)
-
-	// txIdx=99 has no entry; ZeroDelta must not bump the version.
-	s.ZeroDelta(99, []common.Address{addr})
-	if got := s.Version(addr); got != v0 {
-		t.Fatalf("ZeroDelta on absent entry bumped version: %d → %d", v0, got)
-	}
-
-	// And one more sanity: bumping on a present entry still works.
-	s.ZeroDelta(7, []common.Address{addr})
-	if got := s.Version(addr); got <= v0 {
-		t.Fatalf("ZeroDelta on present entry must bump version: %d → %d", v0, got)
-	}
-}
-
-// TestMVBalanceStore_DeleteSingle_BumpsVersion pins that delete (when it
-// finds an entry) advances the version counter so downstream caches
-// invalidate. This is what consumers of Version() rely on.
-func TestMVBalanceStore_DeleteSingle_BumpsVersion(t *testing.T) {
-	s := NewMVBalanceStore()
-	addr := mvBalAddr(1)
-	s.WriteDelta(addr, 3, u(1), u(0))
-	v0 := s.Version(addr)
-
-	s.DeleteSingle(addr, 3)
-	if got := s.Version(addr); got <= v0 {
-		t.Fatalf("DeleteSingle on present entry must bump version: %d → %d", v0, got)
-	}
-
-	// And the no-op path stays no-op.
-	v1 := s.Version(addr)
-	s.DeleteSingle(addr, 99)
-	if got := s.Version(addr); got != v1 {
-		t.Fatalf("DeleteSingle on absent entry must not bump version: %d → %d", v1, got)
-	}
-}
-
 // TestMVBalanceStore_WriteDelta_OutOfOrderInsertion pins the slice-
 // insertion `copy(entries[pos+1:], entries[pos:])` shift that surfaces
 // when a smaller-indexed write lands after a larger one (forces middle
@@ -230,8 +163,8 @@ func TestMVBalanceStore_WriteDelta_OutOfOrderInsertion(t *testing.T) {
 
 // TestMVBalanceStore_LastWriter_LockReleased verifies LastWriter's
 // RUnlock is reachable on every code path. A subsequent writer would
-// deadlock if RUnlock were skipped — test by chaining a writer after
-// a reader.
+// deadlock if LastWriter forgot to RUnlock — test by chaining a writer
+// after a reader.
 func TestMVBalanceStore_LastWriter_LockReleased(t *testing.T) {
 	s := NewMVBalanceStore()
 	addr := mvBalAddr(1)
@@ -250,5 +183,26 @@ func TestMVBalanceStore_LastWriter_LockReleased(t *testing.T) {
 	case <-done:
 	case <-timeAfter(2):
 		t.Fatal("WriteDelta after LastWriter timed out — RUnlock missing?")
+	}
+}
+
+// TestMVBalanceStore_HotKeysDistributeAcrossShards pins the fix for the
+// shard-hash collapse: Polygon's three hottest system contracts (validator
+// set, state receiver, MATIC ERC20) used to all route to shard 0 because
+// `addr[0]<<8 | addr[1] % 64` reduces to `addr[1] % 64` and the leading
+// 18 bytes of those addresses are all zero.
+func TestMVBalanceStore_HotKeysDistributeAcrossShards(t *testing.T) {
+	s := NewMVBalanceStore()
+	hotKeys := []common.Address{
+		common.HexToAddress("0x0000000000000000000000000000000000001000"), // Validator Set
+		common.HexToAddress("0x0000000000000000000000000000000000001001"), // State Receiver
+		common.HexToAddress("0x0000000000000000000000000000000000001010"), // MATIC
+	}
+	seen := make(map[*mvBalanceShard]struct{}, len(hotKeys))
+	for _, addr := range hotKeys {
+		seen[s.shard(addr)] = struct{}{}
+	}
+	if len(seen) < len(hotKeys) {
+		t.Fatalf("Polygon hot system contracts collapsed onto %d shards (want %d distinct)", len(seen), len(hotKeys))
 	}
 }

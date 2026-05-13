@@ -882,10 +882,13 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 				err = bc.validator.ValidateState(block, parallelStatedb, res, false)
 				vtime = time.Since(vstart)
 			}
-			// If context was cancelled (we lost the race), stop prefetcher
-			// before sending result. This prevents "layer stale" errors when
-			// the winner's commit advances the pathdb layer.
-			if ctx.Err() != nil {
+			// Stop prefetcher when either (a) ctx cancelled — we lost the race,
+			// or (b) V2 errored out. In case (b) the fallback in ProcessBlock
+			// overwrites this Result with V1's and decrements processorCount,
+			// so the final drain at "processorCount == 2" won't fire and the
+			// subfetcher goroutines would leak with live trie references that
+			// the about-to-be-committed pathdb layer would invalidate.
+			if err != nil || ctx.Err() != nil {
 				parallelStatedb.StopPrefetcher()
 			}
 			if res == nil {

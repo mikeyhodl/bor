@@ -184,10 +184,22 @@ func MakeMVHashMap() *MVHashMap {
 }
 
 func (mv *MVHashMap) getShard(k Key) *mapShard {
-	// Use first bytes of key for shard selection. The key starts with address
-	// bytes which have good entropy for distribution.
-	h := uint(k[0])<<8 | uint(k[1])
-	return &mv.shards[h%numShards]
+	return &mv.shards[addrShardIndex(k[:common.AddressLength])%numShards]
+}
+
+// addrShardIndex returns an FNV-1a hash of an address (20 bytes), used by
+// every sharded store in this package for shard selection. The naive
+// `addr[0]<<8 | addr[1]` collapses to `addr[1] % N` whenever the shard
+// count divides 256 (any power-of-2 ≤ 256), routing all Polygon system
+// contracts at 0x...001000 / 0x...001001 / 0x...001010 — and any other
+// addresses sharing the first two bytes — to the same shard.
+func addrShardIndex(addr []byte) uint {
+	const fnvOffset, fnvPrime = uint64(14695981039346656037), uint64(1099511628211)
+	h := fnvOffset
+	for i := 0; i < len(addr); i++ {
+		h = (h ^ uint64(addr[i])) * fnvPrime
+	}
+	return uint(h)
 }
 
 type WriteCell struct {
@@ -278,6 +290,7 @@ func (mv *MVHashMap) Write(k Key, v Version, data interface{}) {
 	})
 
 	cells.rw.Lock()
+	defer cells.rw.Unlock()
 	if pos, found := cells.find(v.TxnIndex); !found {
 		// Insert at sorted position
 		cells.entries = append(cells.entries, txnEntry{})
@@ -300,7 +313,6 @@ func (mv *MVHashMap) Write(k Key, v Version, data interface{}) {
 		ci.incarnation = v.Incarnation
 		ci.data = data
 	}
-	cells.rw.Unlock()
 }
 
 func (mv *MVHashMap) MarkEstimate(k Key, txIdx int) {
@@ -309,6 +321,7 @@ func (mv *MVHashMap) MarkEstimate(k Key, txIdx int) {
 	})
 
 	cells.rw.Lock()
+	defer cells.rw.Unlock()
 	if pos, found := cells.find(txIdx); !found {
 		keys := make([]int, len(cells.entries))
 		for i, e := range cells.entries {
@@ -318,7 +331,6 @@ func (mv *MVHashMap) MarkEstimate(k Key, txIdx int) {
 	} else {
 		cells.entries[pos].cell.flag = FlagEstimate
 	}
-	cells.rw.Unlock()
 }
 
 // Delete removes the entry for txIdx.
