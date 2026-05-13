@@ -48,10 +48,10 @@ func runSelfDestructSelfBeneficiary(t *testing.T, useV2 bool) {
 	outerC := common.HexToAddress("0xc31c10fb8301304a36534755c9e38dd553accc54")
 	leaf := common.HexToAddress("0xc31c10fb8301304a36534755c9e38dd553acc954")
 
-	codeA := common.FromHex("6040600060406000600073c31c10fb8301304a36534755c9e38dd553accb54620249f0f160005500")        // CALL outerB
-	codeB := common.FromHex("6040600060406000600073c31c10fb8301304a36534755c9e38dd553accc54620186a0f260015500")        // CALLCODE outerC
+	codeA := common.FromHex("6040600060406000600073c31c10fb8301304a36534755c9e38dd553accb54620249f0f160005500")                                           // CALL outerB
+	codeB := common.FromHex("6040600060406000600073c31c10fb8301304a36534755c9e38dd553accc54620186a0f260015500")                                           // CALLCODE outerC
 	codeC := common.FromHex("6040600060406000600073c31c10fb8301304a36534755c9e38dd553acc95461c350f160025573c31c10fb8301304a36534755c9e38dd553accb54ff00") // CALL leaf, then SELFDESTRUCT(outerB)
-	codeLeaf := common.FromHex("600160035500")                                                                          // SSTORE(3,1)
+	codeLeaf := common.FromHex("600160035500")                                                                                                            // SSTORE(3,1)
 
 	cfg := *params.MergedTestChainConfig
 	cfg.Bor = nil

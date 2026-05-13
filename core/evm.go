@@ -82,9 +82,13 @@ func NewEVMBlockContext(header *types.Header, chain ChainContext, author *common
 	// core/bor_fee_log.go). On non-Bor chain configs (e.g. when running
 	// Ethereum execution-spec-tests) those logs aren't part of the protocol
 	// and pollute the block bloom, so swap Transfer for the no-log variant.
-	transferFn := Transfer
-	if cfg := chain.Config(); cfg == nil || cfg.Bor == nil {
-		transferFn = EthereumTransfer
+	// A nil chain (TestProcessParentBlockHash passes one) also falls into
+	// the no-log branch since we can't read a Bor config off it.
+	transferFn := EthereumTransfer
+	if chain != nil {
+		if cfg := chain.Config(); cfg != nil && cfg.Bor != nil {
+			transferFn = Transfer
+		}
 	}
 
 	return vm.BlockContext{
