@@ -762,7 +762,7 @@ func TestValuesEqual_Bytes(t *testing.T) {
 	}
 }
 
-// TestValuesEqual_Default compares non-byte values via ==.
+// TestValuesEqual_Default compares non-byte values via the typed switch.
 func TestValuesEqual_Default(t *testing.T) {
 	if !valuesEqual(uint64(5), uint64(5)) {
 		t.Fatal("equal uint64 must compare equal")
@@ -774,6 +774,46 @@ func TestValuesEqual_Default(t *testing.T) {
 	if !valuesEqual(h1, common.HexToHash("0x1")) {
 		t.Fatal("equal hashes must compare equal")
 	}
+}
+
+// TestValuesEqual_Bool covers the bool case (suicide/create subpaths).
+func TestValuesEqual_Bool(t *testing.T) {
+	if !valuesEqual(true, true) {
+		t.Fatal("equal bools must compare equal")
+	}
+	if valuesEqual(true, false) {
+		t.Fatal("different bools must not compare equal")
+	}
+	if valuesEqual(true, uint64(1)) {
+		t.Fatal("bool vs uint64 must not compare equal")
+	}
+}
+
+// TestValuesEqual_Nil covers nil-interface absence-read comparisons.
+func TestValuesEqual_Nil(t *testing.T) {
+	if !valuesEqual(nil, nil) {
+		t.Fatal("two nils must compare equal")
+	}
+	if valuesEqual(nil, uint64(0)) {
+		t.Fatal("nil vs typed zero must not compare equal")
+	}
+	if valuesEqual(uint64(0), nil) {
+		t.Fatal("typed zero vs nil must not compare equal")
+	}
+}
+
+// TestValuesEqual_UnsupportedTypePanics ensures the default branch panics
+// rather than silently calling interface{} == . A new MVStore value type
+// that doesn't get an explicit case must surface loudly in CI.
+func TestValuesEqual_UnsupportedTypePanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for unsupported value type")
+		}
+	}()
+	type unsupported struct{ x int }
+	valuesEqual(unsupported{1}, unsupported{1})
 }
 
 // ---------------------------------------------------------------------------

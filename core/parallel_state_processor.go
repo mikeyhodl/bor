@@ -1110,6 +1110,9 @@ func (p *V2StateProcessor) Process(block *types.Block, statedb *state.StateDB, c
 	if result.PanickedIdx >= 0 {
 		return nil, fmt.Errorf("v2: tx %d panicked during execution", result.PanickedIdx)
 	}
+	if result.ValidationPanic != nil {
+		return nil, fmt.Errorf("v2: validation panic: %v", result.ValidationPanic)
+	}
 	// Same logic for ApplyMessage consensus-level errors (bad nonce,
 	// insufficient upfront gas, intrinsic gas underflow, etc.). Serial returns
 	// the underlying error from state_processor.go:222 and aborts the block;

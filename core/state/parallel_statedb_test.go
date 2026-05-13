@@ -789,22 +789,34 @@ func settleFinalDB(t *testing.T) *StateDB {
 	return pdb.rawBase.Copy()
 }
 
-// TestPDB_SettleNoncesAndStorage writes both nonce and storage into the
-// final StateDB and asserts they landed.
-func TestPDB_SettleNoncesAndStorage(t *testing.T) {
+// TestPDB_SettleNonces writes the tx's nonce changes into the final
+// StateDB.
+func TestPDB_SettleNonces(t *testing.T) {
+	pdb, _, _ := newTestPDB(t, 0)
+	final := settleFinalDB(t)
+	addr := common.HexToAddress("0xabcd")
+
+	pdb.SetNonce(addr, 7, tracing.NonceChangeUnspecified)
+
+	pdb.settleNonces(final)
+
+	if got := final.GetNonce(addr); got != 7 {
+		t.Fatalf("nonce: got %d, want 7", got)
+	}
+}
+
+// TestPDB_SettleStorage writes the tx's storage slot changes into the
+// final StateDB.
+func TestPDB_SettleStorage(t *testing.T) {
 	pdb, _, _ := newTestPDB(t, 0)
 	final := settleFinalDB(t)
 	addr := common.HexToAddress("0xabcd")
 	slot := common.HexToHash("0x01")
 
-	pdb.SetNonce(addr, 7, tracing.NonceChangeUnspecified)
 	pdb.SetState(addr, slot, common.HexToHash("0xdead"))
 
-	pdb.settleNoncesAndStorage(final)
+	pdb.settleStorage(final)
 
-	if got := final.GetNonce(addr); got != 7 {
-		t.Fatalf("nonce: got %d, want 7", got)
-	}
 	if got := final.GetState(addr, slot); got != common.HexToHash("0xdead") {
 		t.Fatalf("storage: got %s, want 0xdead", got.Hex())
 	}

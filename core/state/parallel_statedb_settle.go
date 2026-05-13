@@ -20,7 +20,8 @@ func (s *ParallelStateDB) SettleTo(final *StateDB) {
 	// and uses that for the fee transfer log; we must match for parity.
 	preTxCoinbaseBal := final.GetBalance(s.Coinbase)
 
-	s.settleNoncesAndStorage(final)
+	s.settleNonces(final)
+	s.settleStorage(final)
 	s.settleCode(final)
 	s.settleBalanceOpsAndLogs(final)
 	s.settleAccountSet(final)
@@ -32,13 +33,17 @@ func (s *ParallelStateDB) SettleTo(final *StateDB) {
 	final.FinaliseFastWithPrefetch(true)
 }
 
-// settleNoncesAndStorage applies pending nonce and storage writes to final.
-func (s *ParallelStateDB) settleNoncesAndStorage(final *StateDB) {
+// settleNonces applies pending nonce writes to final.
+func (s *ParallelStateDB) settleNonces(final *StateDB) {
 	for addr, nonce := range s.localNonces {
 		final.SetNonceDirect(addr, nonce)
 	}
-	// Origins may be stale (from pathdb), but that only affects the skip
-	// optimization in commitStorage — which we've removed.
+}
+
+// settleStorage applies pending storage writes to final. Origins may be
+// stale (from pathdb), but that only affects the skip optimization in
+// commitStorage — which we've removed.
+func (s *ParallelStateDB) settleStorage(final *StateDB) {
 	for addr, slots := range s.localStorage {
 		origins := make(map[common.Hash]common.Hash, len(slots))
 		for key := range slots {

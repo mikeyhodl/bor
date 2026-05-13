@@ -85,6 +85,106 @@ delivers roughly 1.6x speedup over the serial path
    `WaitForFinal(writerIdx)` until the upstream writer is finalized,
    then re-read.
 
+### Transaction Lifecycle
+
+Each transaction passes through one of two paths:
+
+```
+  Pending → Executing → Validating ─┬─ pass → Finalized → Settled
+                                    └─ fail → ReExecuting → Finalized → Settled
+```
+
+Workers run `Executing` for many txs in parallel; the single validator
+goroutine walks `Validating` in tx-index order; the single settle
+goroutine consumes `Finalized` txs in tx-index order.
+
+#### At most two executions per tx
+
+A transaction is executed at most **twice**: the initial speculative
+run, plus one re-execution if validation fails. The re-executed result
+is trusted by construction — there is no second `Validate()` call. Three
+load-bearing facts make this sound:
+
+1. **Validation runs in tx-index order.** `runValidationLoop` iterates
+   `i = 0..n-1` calling `validateOne(i)` (`v2_executor.go`).
+
+2. **Before validating tx i, all predecessors are finalized.**
+   `validateOne(i)` calls `finishReexec(reexecDone, i-1)`, which
+   blocks on `reexecDone[i-1]` until tx i-1's re-execution has flushed
+   its writes to MVStore. So by the time tx i's reads are checked,
+   every prior tx's writes are committed at their final incarnation.
+
+3. **The re-exec result is trusted, not re-validated.**
+   `finishReexec` marks `finalized[idx]=true` and pushes to settle
+   without calling `Validate()` again.
+
+Together: when tx i's re-execution runs, it sees a fully-stabilized
+predecessor history, so one re-exec converges. The build-tag-gated
+`assertReexecVisitedExactlyOnce` pins this at runtime — every
+dispatched re-exec is consumed exactly once.
+
+#### Worked example: a cascading dependency
+
+Three transactions where each depends on the previous:
+
+```
+tx1: writes slot A
+tx2: reads slot A, writes slot B (only on the correct branch)
+tx3: reads slot B
+```
+
+Phase 1 — parallel speculative execution:
+
+```
+tx1: writes A=newA                                [exec 1]
+tx2: races past tx1, reads A=baseA               [exec 1]
+     wrong branch → no write to B
+tx3: reads B (no writer found, records absence)  [exec 1]
+```
+
+Phase 2 — sequential validation:
+
+```
+validateOne(0): tx1's reads are clean       → finalizePass
+validateOne(1): tx2's recorded read of A
+                doesn't match the current
+                MVStore entry (now tx1's)    → dispatchReexec(1)
+                  tx2 reexec: reads A=newA,
+                  writes B=newB              [exec 2]
+validateOne(2): finishReexec(1) — blocks
+                  until tx2's reexec lands
+                tx3's recorded "no writer
+                for B" no longer matches
+                (tx2 now writes B)           → dispatchReexec(2)
+                  tx3 reexec: reads B=newB,
+                  runs correctly             [exec 2]
+```
+
+Total execution counts: tx1 = 1, tx2 = 2, tx3 = 2. No transaction
+reaches a third execution despite the cascading dependency. The
+property holds because each re-execution runs against a stable
+view — tx3's re-exec sees the final tx2 state, not a transient one,
+because `finishReexec(1)` completed before `validateOne(2)` proceeded
+to re-validate tx3's reads.
+
+This is also the scalability ceiling. Because each successor's
+re-exec waits for the predecessor's re-exec via `finishReexec(i-1)`,
+a chain of dependent re-executions serializes through this gate. The
+worker pool can churn through *initial* executions of later txs in
+parallel during these waits, but re-execs themselves serialize.
+
+#### Concurrency timeline (same cascade)
+
+```
+Workers:    [tx1_exec]──┐ [tx2_exec]──┐ [tx3_exec]──┐ ...
+                        │             │             │
+Validator:              └─validate(0) ┴─validate(1)─┴─validate(2)
+                                       ↓dispatch    ↓ wait(reexec1)
+                                       reexec1───→  ↓dispatch
+                                                    reexec2 ───→
+Settle:                  settle(0)     ...          settle(1)  settle(2)
+```
+
 ### Key data structures
 
 **`*state.ParallelStateDB`** (`core/state/parallel_statedb.go`).
@@ -149,12 +249,12 @@ Special cases:
 ### Settlement
 
 Each validated tx's writes hit `finalDB` via the `*Direct` setter
-family:
+family, in `SettleTo`'s call order:
 
+- **Nonces.** `SetNonceDirect` — bypass journal, mark dirty.
 - **Storage.** `SetStorageDirectWithOrigins` — bypasses journaling and
   pre-populates `originStorage` so `FinaliseFastWithPrefetch` doesn't
   go to disk for origin lookups.
-- **Nonces.** `SetNonceDirect` — bypass journal, mark dirty.
 - **Code.** `SetCode` (the journaled path; rare per-tx).
 - **Balances.** Replayed from the per-tx `BalanceOps` slice in order,
   interleaved with transfer-log emission so receipts and balance

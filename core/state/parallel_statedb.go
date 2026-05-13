@@ -1193,7 +1193,7 @@ func (s *ParallelStateDB) RecordTransfer(sender, recipient common.Address, amoun
 	return true
 }
 
-// SettleTo and its helpers (settleNoncesAndStorage, settleCode,
+// SettleTo and its helpers (settleNonces, settleStorage, settleCode,
 // settleBalanceOpsAndLogs, tryEmitTransferAt, emitTransferLog,
 // settleAccountSet, applyFeeData, GetLogs) live in
 // parallel_statedb_settle.go.

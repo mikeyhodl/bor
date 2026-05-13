@@ -1,26 +1,36 @@
 package state
 
 import (
+	"bytes"
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/blockstm"
 )
 
-// valuesEqual compares two interface{} values safely (handles []byte).
+// valuesEqual compares MVStore reads/writes. New value types MUST add
+// a case — the default panics rather than falling back to interface{}
+// equality, which panics for non-comparable types (slices, maps) and
+// silently uses pointer-identity for pointer types.
 func valuesEqual(a, b interface{}) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
 	switch av := a.(type) {
 	case []byte:
 		bv, ok := b.([]byte)
-		if !ok || len(av) != len(bv) {
-			return false
-		}
-		for i := range av {
-			if av[i] != bv[i] {
-				return false
-			}
-		}
-		return true
+		return ok && bytes.Equal(av, bv)
+	case common.Hash:
+		bv, ok := b.(common.Hash)
+		return ok && av == bv
+	case uint64:
+		bv, ok := b.(uint64)
+		return ok && av == bv
+	case bool:
+		bv, ok := b.(bool)
+		return ok && av == bv
 	default:
-		return a == b
+		panic(fmt.Sprintf("valuesEqual: unsupported MVStore value type %T", a))
 	}
 }
 

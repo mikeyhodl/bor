@@ -37,9 +37,9 @@ func (s *mockV2State) SetDeferMVWrites(bool)                   {}
 
 type mockV2Task struct{ idx int }
 
-func (t *mockV2Task) Index() int                  { return t.idx }
-func (t *mockV2Task) Sender() common.Address      { return common.Address{} }
-func (t *mockV2Task) To() *common.Address         { return nil }
+func (t *mockV2Task) Index() int                    { return t.idx }
+func (t *mockV2Task) Sender() common.Address        { return common.Address{} }
+func (t *mockV2Task) To() *common.Address           { return nil }
 func (t *mockV2Task) Authorities() []common.Address { return nil }
 
 type mockV2Env struct {
@@ -221,16 +221,58 @@ func TestV2ValidationLoopSerializationBlocksReexec(t *testing.T) {
 	}
 }
 
-// nonceMockTask lets tests override Sender/Authorities per task.
-type nonceMockTask struct {
-	idx     int
-	sender  common.Address
-	auths   []common.Address
+type panickingV2State struct{}
+
+func (s *panickingV2State) Validate() bool                          { panic("synthetic validation panic") }
+func (s *panickingV2State) ValidateCategory() string                { return "" }
+func (s *panickingV2State) IsBaseOnly() bool                        { return false }
+func (s *panickingV2State) MarkEstimate()                           {}
+func (s *panickingV2State) CleanupEstimate([]Key, []common.Address) {}
+func (s *panickingV2State) GetWriteKeys() []Key                     { return nil }
+func (s *panickingV2State) GetBalAddrs() []common.Address           { return nil }
+func (s *panickingV2State) FlushToMVStore()                         {}
+func (s *panickingV2State) SetDeferMVWrites(bool)                   {}
+
+type panickingV2Env struct{ s *panickingV2State }
+
+func (e *panickingV2Env) BaseNonce(common.Address) uint64 { return 0 }
+func (e *panickingV2Env) Execute(task V2Task, workerID int, incarnation int,
+	senderNonces map[common.Address]uint64, coinbase common.Address,
+	waitForTx func(int), waitForFinal func(int), deferWrites bool) V2TxState {
+	return e.s
+}
+func (e *panickingV2Env) Recycle(V2TxState) {}
+
+// TestV2ValidationPanicIsRecovered: a panic in Validate() must surface
+// via ValidationPanic rather than crashing the process; settle goroutine
+// must still exit so ExecuteV2BlockSTM doesn't hang on wg.Wait.
+func TestV2ValidationPanicIsRecovered(t *testing.T) {
+	env := &panickingV2Env{s: &panickingV2State{}}
+	tasks := []V2Task{&mockV2Task{0}}
+	settleFn := func(int, V2TxState) {}
+
+	result := ExecuteV2BlockSTM(context.Background(), tasks, env, common.Address{}, 2, nil, settleFn)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.ValidationPanic == nil {
+		t.Fatal("ValidationPanic must be non-nil")
+	}
+	if s, ok := result.ValidationPanic.(string); !ok || s != "synthetic validation panic" {
+		t.Errorf("ValidationPanic = %v, want sentinel string", result.ValidationPanic)
+	}
 }
 
-func (t *nonceMockTask) Index() int                  { return t.idx }
-func (t *nonceMockTask) Sender() common.Address      { return t.sender }
-func (t *nonceMockTask) To() *common.Address         { return nil }
+// nonceMockTask lets tests override Sender/Authorities per task.
+type nonceMockTask struct {
+	idx    int
+	sender common.Address
+	auths  []common.Address
+}
+
+func (t *nonceMockTask) Index() int                    { return t.idx }
+func (t *nonceMockTask) Sender() common.Address        { return t.sender }
+func (t *nonceMockTask) To() *common.Address           { return nil }
 func (t *nonceMockTask) Authorities() []common.Address { return t.auths }
 
 // nonceMockEnv reads BaseNonce from a per-address map.

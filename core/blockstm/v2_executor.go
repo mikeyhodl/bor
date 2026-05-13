@@ -2,11 +2,13 @@ package blockstm
 
 import (
 	"context"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 // ---------------------------------------------------------------------------
@@ -86,6 +88,9 @@ type V2ExecutionResult struct {
 	ValWaitDur  time.Duration // time waiting for workers
 	ValCheckDur time.Duration // time doing validation checks
 	ValReexDur  time.Duration // time blocked on re-execution
+	// Non-nil if runValidationLoop recovered from a panic; caller should
+	// discard this result and fall back to serial.
+	ValidationPanic any
 }
 
 // ExecuteV2BlockSTM runs transactions with pipelined parallel execution.
@@ -161,6 +166,8 @@ type v2ExecCtx struct {
 	valWaitDur  time.Duration
 	valCheckDur time.Duration
 	valReexDur  time.Duration
+
+	validationPanic any // non-nil if runValidationLoop recovered from a panic
 }
 
 func newV2ExecCtx(tasks []V2Task, env V2Env, coinbase common.Address,
@@ -624,6 +631,23 @@ func (x *v2ExecCtx) validateOne(reexecDone []chan struct{}, i int) bool {
 // toPrev or vfailed[i-1]). After the main loop, it drains any leftovers.
 func (x *v2ExecCtx) runValidationLoop(valDone chan struct{}) {
 	defer close(valDone)
+
+	// Defer order (LIFO): recover runs first to capture the panic, then
+	// chSettle is closed so the settle goroutine drains even on panic.
+	settleClosed := false
+	defer func() {
+		if x.chSettle != nil && !settleClosed {
+			close(x.chSettle)
+		}
+	}()
+	defer func() {
+		if r := recover(); r != nil {
+			x.validationPanic = r
+			log.Error("V2 validation panic — falling back to serial",
+				"err", r, "stack", string(debug.Stack()))
+		}
+	}()
+
 	reexecDone := make([]chan struct{}, x.n)
 	cancelled := false
 	for i := 0; i < x.n; i++ {
@@ -652,6 +676,7 @@ func (x *v2ExecCtx) runValidationLoop(valDone chan struct{}) {
 	// drain. Closing chSettle terminates the settlement goroutine.
 	if x.chSettle != nil {
 		close(x.chSettle)
+		settleClosed = true
 	}
 }
 
@@ -669,16 +694,17 @@ func (x *v2ExecCtx) buildResult(startTime time.Time, settleStart, settleEnd *tim
 		sd = settleEnd.Sub(*settleStart)
 	}
 	return &V2ExecutionResult{
-		States:      x.states,
-		ExecCount:   int(x.execCount.Load()),
-		VFailCount:  int(x.vfailCount.Load()),
-		VFailCats:   x.vfailCats,
-		VFailIdxs:   x.vfailIdxs,
-		Phase1:      phase1Dur,
-		BaseOnly:    baseOnly,
-		SettleDur:   sd,
-		ValWaitDur:  x.valWaitDur,
-		ValCheckDur: x.valCheckDur,
-		ValReexDur:  x.valReexDur,
+		States:          x.states,
+		ExecCount:       int(x.execCount.Load()),
+		VFailCount:      int(x.vfailCount.Load()),
+		VFailCats:       x.vfailCats,
+		VFailIdxs:       x.vfailIdxs,
+		Phase1:          phase1Dur,
+		BaseOnly:        baseOnly,
+		SettleDur:       sd,
+		ValWaitDur:      x.valWaitDur,
+		ValCheckDur:     x.valCheckDur,
+		ValReexDur:      x.valReexDur,
+		ValidationPanic: x.validationPanic,
 	}
 }
