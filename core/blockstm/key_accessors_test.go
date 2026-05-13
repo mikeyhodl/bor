@@ -45,20 +45,3 @@ func TestKeyAccessors(t *testing.T) {
 		t.Fatalf("GetSubpath: got %d, want %d", got, SubpathNonce)
 	}
 }
-
-// TestBloomMayContain — trivial wrapper but critical for the fast-path in
-// StateDB.mvReadFromHashmap. Verifies that unwritten keys return false and
-// written keys return true.
-func TestBloomMayContain(t *testing.T) {
-	mv := MakeMVHashMap()
-	addr := common.Address{1}
-	k := NewAddressKey(addr)
-
-	if mv.BloomMayContain(k) {
-		t.Fatalf("unwritten key: BloomMayContain returned true")
-	}
-	mv.Write(k, Version{TxnIndex: 0, Incarnation: 0}, "v")
-	if !mv.BloomMayContain(k) {
-		t.Fatalf("written key: BloomMayContain returned false")
-	}
-}

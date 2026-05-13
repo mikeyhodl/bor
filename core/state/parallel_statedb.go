@@ -700,6 +700,9 @@ func (s *ParallelStateDB) GetNonce(addr common.Address) uint64 {
 	}
 	if suicideIdx >= 0 {
 		// Destroyed and no later nonce writer → 0 (matches serial post-Finalise).
+		// Record the miss so a later writer for nonceKey invalidates this tx —
+		// mirrors GetCodeHash's unconditional record-on-miss pattern.
+		s.recordStoreRead(nonceKey, -1, 0, uint64(0))
 		return 0
 	}
 	baseNonce := s.base.GetNonce(addr)
@@ -739,6 +742,9 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 		return nil
 	}
 	if suicideIdx >= 0 {
+		// Record the miss so a later code writer invalidates this tx —
+		// mirrors GetCodeHash's unconditional record-on-miss pattern.
+		s.recordStoreRead(codeKey, -1, 0, []byte(nil))
 		return nil
 	}
 	baseCode := s.base.GetCode(addr)
@@ -860,7 +866,10 @@ func (s *ParallelStateDB) GetState(addr common.Address, key common.Hash) common.
 	if suicideIdx >= 0 {
 		// Destroyed and no later writer → wiped. Don't fall through to
 		// base: even if recreated, slots from before destruction don't
-		// come back.
+		// come back. Record the miss so a later writer for stateKey
+		// invalidates this tx — mirrors GetCodeHash's unconditional
+		// record-on-miss pattern.
+		s.recordStoreRead(stateKey, -1, 0, common.Hash{})
 		return common.Hash{}
 	}
 	baseVal := s.base.GetState(addr, key)
@@ -886,9 +895,14 @@ func (s *ParallelStateDB) GetCommittedState(addr common.Address, key common.Hash
 			result = val.(common.Hash)
 		}
 		// else: destroyed after this write → result stays zero
-	} else if suicideIdx < 0 {
-		// No writer and no destruction → fall through to base.
-		result = s.base.GetCommittedState(addr, key)
+	} else {
+		if suicideIdx < 0 {
+			// No writer and no destruction → fall through to base.
+			result = s.base.GetCommittedState(addr, key)
+		}
+		// Record unconditionally on miss — including the destructed-miss
+		// case — so a later writer for mvKey invalidates this tx. Mirrors
+		// GetCodeHash's record-on-miss pattern.
 		s.recordStoreRead(mvKey, -1, 0, result)
 	}
 	if s.committedCache == nil {

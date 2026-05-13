@@ -1699,3 +1699,129 @@ func TestPDB_ApplyFeeData_FeeLogFnCalledWithPositiveTip(t *testing.T) {
 		t.Fatalf("tip arg: got %v, want 3", gotTip)
 	}
 }
+
+// hasStoreRead reports whether sr contains an entry for k.
+func hasStoreRead(sr []StoreReadDesc, k blockstm.Key) bool {
+	for _, r := range sr {
+		if r.Key == k {
+			return true
+		}
+	}
+	return false
+}
+
+// recordPriorDestruct simulates a prior tx D destroying addr by writing
+// SuicidePath_addr to the shared MVStore at writer index destructorIdx.
+func recordPriorDestruct(store *blockstm.MVStore, addr common.Address, destructorIdx int) {
+	store.WriteInc(blockstm.NewSubpathKey(addr, SuicidePath), destructorIdx, 0, true)
+}
+
+// TestPDB_DestructedMiss_RecordsRead pins the cross-tx invalidation contract
+// for the four PDB getters on the (prior-destructor + MVStore miss) path.
+//
+// Pre-fix: GetState, GetCommittedState, GetCode, GetNonce returned the zero
+// value without recording the read; validation then could not invalidate
+// the reader when a re-executed prior tx later wrote the key. That allowed
+// V2 to settle a zero where serial saw the real value — a state-root
+// divergence. The sibling GetCodeHash already records the miss on this
+// path; these tests pin the same contract on the other four.
+func TestPDB_DestructedMiss_RecordsRead(t *testing.T) {
+	addr := common.HexToAddress("0xa")
+	slot := common.HexToHash("0x1")
+	const destructorIdx = 1
+	const readerIdx = 5
+
+	t.Run("GetState", func(t *testing.T) {
+		pdb, store, _ := newTestPDB(t, readerIdx)
+		pdb.EnableReadTracking()
+		recordPriorDestruct(store, addr, destructorIdx)
+
+		got := pdb.GetState(addr, slot)
+		if got != (common.Hash{}) {
+			t.Fatalf("GetState on destructed-miss: got %v, want zero", got)
+		}
+		key := blockstm.NewStateKey(addr, slot)
+		if !hasStoreRead(pdb.StoreReads, key) {
+			t.Fatalf("GetState did not record read for stateKey(%x, %x); a later writer cannot invalidate this tx",
+				addr, slot)
+		}
+	})
+
+	t.Run("GetCommittedState", func(t *testing.T) {
+		pdb, store, _ := newTestPDB(t, readerIdx)
+		pdb.EnableReadTracking()
+		recordPriorDestruct(store, addr, destructorIdx)
+
+		got := pdb.GetCommittedState(addr, slot)
+		if got != (common.Hash{}) {
+			t.Fatalf("GetCommittedState on destructed-miss: got %v, want zero", got)
+		}
+		key := blockstm.NewStateKey(addr, slot)
+		if !hasStoreRead(pdb.StoreReads, key) {
+			t.Fatalf("GetCommittedState did not record read for stateKey(%x, %x)",
+				addr, slot)
+		}
+	})
+
+	t.Run("GetCode", func(t *testing.T) {
+		pdb, store, _ := newTestPDB(t, readerIdx)
+		pdb.EnableReadTracking()
+		recordPriorDestruct(store, addr, destructorIdx)
+
+		got := pdb.GetCode(addr)
+		if got != nil {
+			t.Fatalf("GetCode on destructed-miss: got %v, want nil", got)
+		}
+		key := blockstm.NewSubpathKey(addr, CodePath)
+		if !hasStoreRead(pdb.StoreReads, key) {
+			t.Fatalf("GetCode did not record read for codeKey(%x)", addr)
+		}
+	})
+
+	t.Run("GetNonce", func(t *testing.T) {
+		pdb, store, _ := newTestPDB(t, readerIdx)
+		pdb.EnableReadTracking()
+		recordPriorDestruct(store, addr, destructorIdx)
+
+		got := pdb.GetNonce(addr)
+		if got != 0 {
+			t.Fatalf("GetNonce on destructed-miss: got %d, want 0", got)
+		}
+		key := blockstm.NewSubpathKey(addr, NoncePath)
+		if !hasStoreRead(pdb.StoreReads, key) {
+			t.Fatalf("GetNonce did not record read for nonceKey(%x)", addr)
+		}
+	})
+}
+
+// TestPDB_DestructedMiss_LaterWriterInvalidates is the end-to-end pin:
+// (1) tx D destroys A; (2) tx Y at a higher index reads (A, slot) and
+// settles zero; (3) the destructor or some later tx then writes (A, slot)
+// with a real value. After step (3), Y.Validate() must return false so
+// the executor re-executes Y. Pre-fix this returned true (false negative).
+func TestPDB_DestructedMiss_LaterWriterInvalidates(t *testing.T) {
+	addr := common.HexToAddress("0xa")
+	slot := common.HexToHash("0x1")
+	stateK := blockstm.NewStateKey(addr, slot)
+	const destructorIdx = 1
+	const writerIdx = 3
+	const readerIdx = 5
+
+	pdb, store, _ := newTestPDB(t, readerIdx)
+	pdb.EnableReadTracking()
+	recordPriorDestruct(store, addr, destructorIdx)
+
+	// Reader observes zero (no slot writer yet).
+	if got := pdb.GetState(addr, slot); got != (common.Hash{}) {
+		t.Fatalf("pre-write read: got %v, want zero", got)
+	}
+
+	// Later writer lands AFTER the destructor (writerIdx > destructorIdx),
+	// which is the case that produces serial=value vs v2=zero divergence.
+	realVal := common.HexToHash("0xbeef")
+	store.WriteInc(stateK, writerIdx, 0, realVal)
+
+	if pdb.Validate() {
+		t.Fatal("Validate=true after a later writer for the destructed-miss key — the reader settles a stale zero while serial would observe the new value")
+	}
+}

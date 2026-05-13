@@ -936,20 +936,26 @@ func newV2Env(base *state.StateDB, store *blockstm.MVStore, bals *blockstm.MVBal
 	sharedSafeBase := state.NewSafeBase(base, poolSize)
 	// Share the trieReader's storage cache with SafeBase so V2 workers get
 	// instant sync.Map hits for slots the prefetcher already warmed.
-	//
-	// The trie reader's cache only sees values it loaded FROM the trie. Any
-	// pre-block writes that live only in stateObject.dirty/pendingStorage —
-	// notably the EIP-4788 BeaconRoots and EIP-2935 ParentBlockHash system
-	// contracts — are invisible to it. Workers reading via SafeBase would hit
-	// a stale zero (from the prefetcher's trie read) instead of the system
-	// call's freshly-written value, and any tx that reads back those slots
-	// (EIP-4788 user-call path checks storage[t%8191] == t) reverts. Overlay
-	// every stateObject's in-memory storage onto the cache so SafeBase serves
-	// post-system-call values.
 	if sc := base.StorageCache(); sc != nil {
-		base.OverlayPendingStorageInto(sc)
 		sharedSafeBase.SharedStorageCache = sc
 	}
+	// Pre-block writes that live only in stateObject.dirty/pendingStorage —
+	// notably the EIP-4788 BeaconRoots and EIP-2935 ParentBlockHash system
+	// contracts — are invisible to the trieReader cache. Without an overlay,
+	// workers reading via SafeBase hit a stale zero (from the prefetcher's
+	// trie read) instead of the system call's freshly-written value, and any
+	// tx that reads back those slots (EIP-4788 user-call path checks
+	// storage[t%8191] == t) reverts.
+	//
+	// The overlay must NOT write into the prefetcher's trieReader cache.
+	// trieReader.Storage does a non-atomic Load → trie-read → plain Store,
+	// so a concurrent trie read that lands after the overlay would clobber
+	// the post-system-call value with the raw trie zero. Park the overlay
+	// in a V2-owned map that the prefetcher cannot reach, and have SafeBase
+	// check it before the shared trie cache.
+	overlay := new(sync.Map)
+	base.OverlayPendingStorageInto(overlay)
+	sharedSafeBase.OverlayStorageCache = overlay
 	// Allocate the per-v2Env fallback only when the caller didn't supply a
 	// shared cache. Production (blockchain.go) sets vmConfig.SharedJumpDestCache
 	// on the prefetcher-warmed cache, so allocating here would just be dead

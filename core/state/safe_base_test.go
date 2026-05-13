@@ -1,6 +1,7 @@
 package state
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -144,5 +145,56 @@ func TestSafeBase_GetStorageRoot(t *testing.T) {
 	r2 := sb.GetStorageRoot(addr)
 	if r1 != r2 {
 		t.Fatalf("GetStorageRoot not stable: %s vs %s", r1.Hex(), r2.Hex())
+	}
+}
+
+// TestSafeBase_OverlayWinsOverSharedCache pins the read-priority contract
+// for EIP-4788/EIP-2935 pre-block system-call writes: SafeBase.GetState
+// must return the overlay value even if SharedStorageCache (the prefetcher's
+// trieReader cache) carries a stale zero for the same key. A non-atomic
+// Load → trie-read → Store in trieReader.Storage can land its zero after
+// OverlayPendingStorageInto on a fast-prefetcher / slow-overlay path; the
+// post-system-call value still has to win when SafeBase serves a read.
+func TestSafeBase_OverlayWinsOverSharedCache(t *testing.T) {
+	addr := common.HexToAddress("0xabcd")
+	sb := newTestSafeBase(t, addr)
+	slot := common.HexToHash("0x42")
+	sk := stateKey{addr: addr, slot: slot}
+
+	// Prefetcher landed first: stale zero in the shared trie cache.
+	shared := new(sync.Map)
+	shared.Store(sk, common.Hash{})
+	sb.SharedStorageCache = shared
+
+	// Overlay landed second: post-system-call value.
+	overlay := new(sync.Map)
+	beaconRoot := common.HexToHash("0xbeef")
+	overlay.Store(sk, beaconRoot)
+	sb.OverlayStorageCache = overlay
+
+	if got := sb.GetState(addr, slot); got != beaconRoot {
+		t.Fatalf("GetState: got %s, want %s (overlay must beat the shared trie cache)",
+			got.Hex(), beaconRoot.Hex())
+	}
+}
+
+// TestSafeBase_SharedCacheStillUsedWithoutOverlay pins that the existing
+// fast-path through SharedStorageCache continues to work when the overlay
+// is absent — non-system-call slots warmed by the prefetcher should still
+// serve without a pool acquire.
+func TestSafeBase_SharedCacheStillUsedWithoutOverlay(t *testing.T) {
+	addr := common.HexToAddress("0xabcd")
+	sb := newTestSafeBase(t, addr)
+	slot := common.HexToHash("0x99")
+	sk := stateKey{addr: addr, slot: slot}
+
+	shared := new(sync.Map)
+	want := common.HexToHash("0xcafe")
+	shared.Store(sk, want)
+	sb.SharedStorageCache = shared
+
+	if got := sb.GetState(addr, slot); got != want {
+		t.Fatalf("GetState: got %s, want %s (shared cache hit expected)",
+			got.Hex(), want.Hex())
 	}
 }
