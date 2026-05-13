@@ -1794,6 +1794,68 @@ func TestPDB_DestructedMiss_RecordsRead(t *testing.T) {
 	})
 }
 
+// TestPDB_GetCommittedState_NoDestructor_FallsThroughToBase pins the
+// no-destructor branch of GetCommittedState: with suicideIdx < 0 and no
+// MVStore writer for the slot, result must come from base state — kills
+// the `remove if body` mutation on the base-read assignment.
+func TestPDB_GetCommittedState_NoDestructor_FallsThroughToBase(t *testing.T) {
+	addr := common.HexToAddress("0xa")
+	slot := common.HexToHash("0x1")
+	want := common.HexToHash("0xbeef")
+
+	memdb := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(memdb, triedb.HashDefaults)
+	sdb, err := New(types.EmptyRootHash, NewDatabase(tdb, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdb.SetState(addr, slot, want)
+	base := NewSafeBase(sdb, 2)
+	store := blockstm.NewMVStore()
+	bals := blockstm.NewMVBalanceStore()
+	pdb := NewParallelStateDB(5, base, store, bals)
+	pdb.EnableReadTracking()
+
+	got := pdb.GetCommittedState(addr, slot)
+	if got != want {
+		t.Fatalf("GetCommittedState with no destructor: got %s, want %s (must fall through to base)",
+			got.Hex(), want.Hex())
+	}
+}
+
+// TestPDB_GetCommittedState_DestructorAtZero pins the boundary of the
+// `suicideIdx < 0` test: a destructor at tx index 0 must NOT trigger the
+// base read — destructed accounts have wiped storage. Kills the `< -> <=`
+// boundary mutation, which would otherwise flip the test to true when
+// suicideIdx == 0 and incorrectly serve the pre-destruction base value.
+func TestPDB_GetCommittedState_DestructorAtZero(t *testing.T) {
+	addr := common.HexToAddress("0xa")
+	slot := common.HexToHash("0x1")
+	preDestructionVal := common.HexToHash("0xbeef")
+
+	memdb := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(memdb, triedb.HashDefaults)
+	sdb, err := New(types.EmptyRootHash, NewDatabase(tdb, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sdb.SetState(addr, slot, preDestructionVal)
+	base := NewSafeBase(sdb, 2)
+	store := blockstm.NewMVStore()
+	bals := blockstm.NewMVBalanceStore()
+	// Tx 0 destructed addr; reader is tx 5. priorDestructedAt returns 0,
+	// which is the exact boundary the < 0 check guards.
+	store.WriteInc(blockstm.NewSubpathKey(addr, SuicidePath), 0, 0, true)
+	pdb := NewParallelStateDB(5, base, store, bals)
+	pdb.EnableReadTracking()
+
+	got := pdb.GetCommittedState(addr, slot)
+	if got != (common.Hash{}) {
+		t.Fatalf("GetCommittedState with destructor at tx 0: got %s, want zero (pre-destruction base must not bleed through)",
+			got.Hex())
+	}
+}
+
 // TestPDB_DestructedMiss_LaterWriterInvalidates is the end-to-end pin:
 // (1) tx D destroys A; (2) tx Y at a higher index reads (A, slot) and
 // settles zero; (3) the destructor or some later tx then writes (A, slot)

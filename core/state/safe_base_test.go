@@ -178,6 +178,37 @@ func TestSafeBase_OverlayWinsOverSharedCache(t *testing.T) {
 	}
 }
 
+// TestSafeBase_OverlayResult_CachedInStateCache pins that an overlay hit
+// is cached into the local stateCache for subsequent reads — so once a
+// post-system-call value is observed, the GetState path stays fast and
+// doesn't repeatedly traverse OverlayStorageCache. Kills the `remove
+// call statement` mutation on the stateCache.Store call after an overlay
+// hit: we mutate the overlay between the two reads; the second read still
+// has to return the original value via the local stateCache hit.
+func TestSafeBase_OverlayResult_CachedInStateCache(t *testing.T) {
+	addr := common.HexToAddress("0xabcd")
+	sb := newTestSafeBase(t, addr)
+	slot := common.HexToHash("0x42")
+	sk := stateKey{addr: addr, slot: slot}
+
+	overlay := new(sync.Map)
+	want := common.HexToHash("0xbeef")
+	overlay.Store(sk, want)
+	sb.OverlayStorageCache = overlay
+
+	if got := sb.GetState(addr, slot); got != want {
+		t.Fatalf("GetState first call: got %s, want %s", got.Hex(), want.Hex())
+	}
+	// Mutate the overlay underneath — the second read must still return
+	// the original value, served from the local stateCache populated on
+	// the first call.
+	overlay.Store(sk, common.HexToHash("0xfeed"))
+	if got := sb.GetState(addr, slot); got != want {
+		t.Fatalf("GetState second call: got %s, want %s (overlay hit must have populated stateCache)",
+			got.Hex(), want.Hex())
+	}
+}
+
 // TestSafeBase_SharedCacheStillUsedWithoutOverlay pins that the existing
 // fast-path through SharedStorageCache continues to work when the overlay
 // is absent — non-system-call slots warmed by the prefetcher should still
