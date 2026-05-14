@@ -446,10 +446,17 @@ func ValidateVersion(txIdx int, lastInputOutput *TxnInputOutput, versionedData *
 	valid = true
 
 	for _, rd := range lastInputOutput.ReadSet(txIdx) {
-		// Skip address key validation. Address keys track "account was accessed"
-		// via getStateObject deep copy. They never change within a block on
-		// Polygon (no SELFDESTRUCT for popular contracts). Skipping eliminates
-		// a major source of false VFails from concurrent account access.
+		// V1 is no longer the production processor (NewParallelBlockChain
+		// wires V2 since the BlockSTM v2 work) — this path is reached only
+		// by the V1 differential tests and the V1 mainnet-witness baseline.
+		// Address keys are written by every getStateObject deep-copy and
+		// also by account creation (statedb.createObject / CreateContract).
+		// Validating them in V1 produces a high rate of false vfails on
+		// the differential corpus from incidental concurrent account
+		// access — skip them to keep the V1 baseline reasonable to run.
+		// V2 has its own validation path (parallel_statedb_validate.go),
+		// which does not use this short-circuit and correctly catches
+		// cross-tx creation reads.
 		if rd.Path.IsAddress() {
 			continue
 		}

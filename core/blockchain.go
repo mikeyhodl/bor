@@ -824,7 +824,7 @@ func (bc *BlockChain) startPrefetchGoroutine(block *types.Block, throwaway *stat
 	}(time.Now())
 }
 
-func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, witness *stateless.Witness, followupInterrupt *atomic.Bool) (_ types.Receipts, _ []*types.Log, _ uint64, _ *state.StateDB, vtime time.Duration, blockEndErr error) {
+func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, witness *stateless.Witness, followupInterrupt *atomic.Bool) (_ types.Receipts, _ []*types.Log, _ uint64, _ *state.StateDB, _ time.Duration, blockEndErr error) {
 	// Process the block using processor and parallelProcessor at the same time, take the one which finishes first, cancel the other, and return the result
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -855,6 +855,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		statedb  *state.StateDB
 		counter  *metrics.Counter
 		parallel bool
+		vtime    time.Duration // ValidateState wall time on this goroutine
 	}
 
 	var resultChanLen int = 2
@@ -877,10 +878,11 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 			sharedCaches.applyTo(&v2VmCfg)
 			res, err := bc.parallelProcessor.Process(block, parallelStatedb, v2VmCfg, nil, ctx)
 			blockExecutionParallelTimer.UpdateSince(pstart)
+			var localVtime time.Duration
 			if err == nil {
 				vstart := time.Now()
 				err = bc.validator.ValidateState(block, parallelStatedb, res, false)
-				vtime = time.Since(vstart)
+				localVtime = time.Since(vstart)
 			}
 			// Stop prefetcher when either (a) ctx cancelled — we lost the race,
 			// or (b) V2 errored out. In case (b) the fallback in ProcessBlock
@@ -894,7 +896,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 			if res == nil {
 				res = &ProcessResult{}
 			}
-			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, parallelStatedb, blockExecutionParallelCounter, true}
+			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, parallelStatedb, blockExecutionParallelCounter, true, localVtime}
 		}()
 	}
 
@@ -906,18 +908,21 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 			statedb.StartPrefetcher("chain", witness, nil)
 			res, err := bc.processor.Process(block, statedb, bc.cfg.VmConfig, nil, ctx)
 			blockExecutionSerialTimer.UpdateSince(pstart)
+			var localVtime time.Duration
 			if err == nil {
 				vstart := time.Now()
 				err = bc.validator.ValidateState(block, statedb, res, false)
-				vtime = time.Since(vstart)
+				localVtime = time.Since(vstart)
 			}
-			if ctx.Err() != nil {
+			// Mirror V2's err-or-ctx stop (4c688e4) so V1's subfetchers
+			// don't outlive a discarded errored result across pathdb commit.
+			if err != nil || ctx.Err() != nil {
 				statedb.StopPrefetcher()
 			}
 			if res == nil {
 				res = &ProcessResult{}
 			}
-			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, statedb, blockExecutionSerialCounter, false}
+			resultChan <- Result{res.Receipts, res.Logs, res.GasUsed, err, statedb, blockExecutionSerialCounter, false, localVtime}
 		}()
 	}
 
@@ -968,7 +973,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 	if txs := block.Transactions(); len(txs) > 0 {
 		hasStateSync = txs[len(txs)-1].Type() == types.StateSyncTxType
 	}
-	if elapsed := time.Since(execStart); elapsed > 0 && result.usedGas > 0 && !hasStateSync {
+	if elapsed := time.Since(execStart); elapsed > 0 && result.usedGas > 0 && !hasStateSync && result.err == nil {
 		mgasps := int64(float64(result.usedGas) * 1e6 / float64(elapsed)) // µgasps (mgasps * 1000)
 		blockMgaspsMeter.Update(mgasps)
 	}
@@ -985,7 +990,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		second_result.statedb.StopPrefetcher()
 	}
 
-	return result.receipts, result.logs, result.usedGas, result.statedb, vtime, result.err
+	return result.receipts, result.logs, result.usedGas, result.statedb, result.vtime, result.err
 }
 
 func (bc *BlockChain) setupSnapshot() {

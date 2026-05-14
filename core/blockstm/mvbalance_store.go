@@ -108,9 +108,13 @@ func (s *MVBalanceStore) GetTxDelta(addr common.Address, txIdx int) (add, sub ui
 	return
 }
 
-// ZeroDelta resets the delta for txIdx to zero but keeps the entry.
-// This allows LastWriter to still find the txIdx (for waitForTx during
-// parallel re-execution), while WriteDelta accumulates correctly from zero.
+// ZeroDelta resets the delta for txIdx to zero on each addr but keeps
+// the entry in place. ParallelStateDB.MarkEstimate calls this on every
+// addr the tx touched before re-execution; the entry stays so a future
+// WriteDelta from the new incarnation accumulates from zero (matching
+// the post-Finalise semantics serial uses) instead of stacking onto the
+// stale delta. CleanupEstimate / DeleteSingle then removes the zeroed
+// entry afterwards if the new incarnation didn't re-touch the addr.
 func (s *MVBalanceStore) ZeroDelta(txIdx int, addrs []common.Address) {
 	for _, addr := range addrs {
 		sh := s.shard(addr)
