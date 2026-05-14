@@ -160,9 +160,6 @@ type MVHashMap struct {
 	shards [numShards]mapShard
 	bloom  writeBloom
 
-	// Lazy write mode: store write buffers per tx. Reads use a lock-free
-	// index for O(1) lookup of the latest writer per key.
-
 	// Ablation flags for performance experiments
 	SkipSettle   bool
 	SkipFinalise bool
