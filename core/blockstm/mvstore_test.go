@@ -106,3 +106,54 @@ func TestMVStore_BloomFastPath(t *testing.T) {
 		t.Fatalf("ReadVersionFull on unwritten key returned found=true")
 	}
 }
+
+// TestBloomHashes_TypeByteContributes pins that the type byte k[53] (which
+// distinguishes addressType / stateType / subpathType keys) actually
+// influences at least one of the three hash dimensions. Pre-fix the type
+// byte was XORed into h3's <<24 slot, which the 15-bit bloomMask discarded
+// — so address-only and subpath keys with the same address produced
+// identical (h1, h2, h3) triples and shared bloom slots.
+func TestBloomHashes_TypeByteContributes(t *testing.T) {
+	addr := common.Address{0xab, 0xcd}
+	addrKey := NewAddressKey(addr)
+	subKey := NewSubpathKey(addr, 0) // type byte differs; subpath byte zero matches addr-only
+
+	a1, a2, a3 := bloomHashes(addrKey)
+	b1, b2, b3 := bloomHashes(subKey)
+	if a1 == b1 && a2 == b2 && a3 == b3 {
+		t.Fatalf("type byte must influence at least one bloom hash; got identical (%d,%d,%d) for addressType and subpathType keys with the same address",
+			a1, a2, a3)
+	}
+}
+
+// TestBloomHashes_HighBytesContribute pins that the bytes shifted into
+// bits 16-31 (k[2..3], k[18..19], k[10..11], k[30..31]) actually influence
+// the masked output. Pre-fix the mask discarded those bits, so changing
+// any of these bytes left every hash unchanged. Post-fix the XOR-fold
+// mixes the upper-half bits back into the kept low 15.
+func TestBloomHashes_HighBytesContribute(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Key)
+	}{
+		{"k[3] in h1 high slot", func(k *Key) { k[3] = 0xff }},
+		{"k[19] in h2 high slot", func(k *Key) { k[19] = 0xff }},
+		{"k[11] in h3 high slot", func(k *Key) { k[11] = 0xff }},
+		{"k[31] in h3 high slot", func(k *Key) { k[31] = 0xff }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			base := NewStateKey(common.Address{0xaa}, common.Hash{0xbb})
+			h1, h2, h3 := bloomHashes(base)
+
+			mut := base
+			c.mutate(&mut)
+			m1, m2, m3 := bloomHashes(mut)
+
+			if h1 == m1 && h2 == m2 && h3 == m3 {
+				t.Fatalf("mutating %s left every hash unchanged: (%d,%d,%d) — upper bits discarded by mask",
+					c.name, h1, h2, h3)
+			}
+		})
+	}
+}

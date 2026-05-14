@@ -43,6 +43,11 @@ type writeBloom struct {
 // key class. h3 mixes the address middle with the hash tail and the
 // subpath/type bytes, so address-only / subpath / state keys are all
 // distinguishable in the third dimension as well.
+//
+// bloomMask is 15 bits wide, so each hash term is XOR-folded back from its
+// 32-bit span before masking — otherwise the bits 15-31 portion (including
+// the type byte k[53] in h3) would be discarded by the mask and contribute
+// zero entropy.
 func bloomHashes(k Key) (uint, uint, uint) {
 	_ = k[53] // bounds check hint (covers all reads below)
 	h1 := uint(k[0]) | uint(k[1])<<8 | uint(k[2])<<16 | uint(k[3])<<24
@@ -51,7 +56,14 @@ func bloomHashes(k Key) (uint, uint, uint) {
 		(uint(k[9])^uint(k[29]))<<8 |
 		(uint(k[10])^uint(k[30]))<<16 |
 		(uint(k[11])^uint(k[31])^uint(k[53]))<<24
-	return h1 & bloomMask, h2 & bloomMask, h3 & bloomMask
+	return bloomFold(h1), bloomFold(h2), bloomFold(h3)
+}
+
+// bloomFold mixes the upper bits of a 32-bit hash into the low 15 bits
+// before masking, so bytes shifted past bit 14 still contribute entropy
+// (in particular the type byte k[53] in h3's <<24 slot).
+func bloomFold(h uint) uint {
+	return (h ^ (h >> 15) ^ (h >> 30)) & bloomMask
 }
 
 func (b *writeBloom) add(k Key) {
