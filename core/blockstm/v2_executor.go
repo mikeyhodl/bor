@@ -48,7 +48,6 @@ const InFlightTaskMultiplier = 4
 type V2TxState interface {
 	Validate() bool
 	ValidateCategory() string // returns "" if valid, or failure category ("balance", "storage", etc.)
-	IsBaseOnly() bool
 	MarkEstimate()
 	CleanupEstimate(oldWriteKeys []Key, oldBalAddrs []common.Address)
 	GetWriteKeys() []Key
@@ -82,7 +81,6 @@ type V2ExecutionResult struct {
 	VFailCats  map[string]int // validation failure categories
 	VFailIdxs  []int          // task indices that failed validation
 	Phase1     time.Duration
-	BaseOnly   int
 	SettleDur  time.Duration // wall time of settle goroutine
 	// Validation goroutine wall-time breakdown
 	ValWaitDur  time.Duration // time waiting for workers
@@ -688,12 +686,6 @@ func (x *v2ExecCtx) runValidationLoop(valDone chan struct{}) {
 // buildResult collects timings and per-tx state into a V2ExecutionResult.
 func (x *v2ExecCtx) buildResult(startTime time.Time, settleStart, settleEnd *time.Time) *V2ExecutionResult {
 	phase1Dur := time.Since(startTime)
-	baseOnly := 0
-	for i := 0; i < x.n; i++ {
-		if x.states[i] != nil && x.states[i].IsBaseOnly() {
-			baseOnly++
-		}
-	}
 	var sd time.Duration
 	if !settleEnd.IsZero() {
 		sd = settleEnd.Sub(*settleStart)
@@ -705,7 +697,6 @@ func (x *v2ExecCtx) buildResult(startTime time.Time, settleStart, settleEnd *tim
 		VFailCats:       x.vfailCats,
 		VFailIdxs:       x.vfailIdxs,
 		Phase1:          phase1Dur,
-		BaseOnly:        baseOnly,
 		SettleDur:       sd,
 		ValWaitDur:      x.valWaitDur,
 		ValCheckDur:     x.valCheckDur,

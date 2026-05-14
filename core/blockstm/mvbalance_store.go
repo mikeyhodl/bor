@@ -93,22 +93,6 @@ func (s *MVBalanceStore) ReadDelta(addr common.Address, txIdx int) (add, sub uin
 	return
 }
 
-// LastWriter returns the highest txIdx that wrote a balance delta for addr
-// before txIdx, or -1 if none.
-func (s *MVBalanceStore) LastWriter(addr common.Address, txIdx int) int {
-	sh := s.shard(addr)
-	sh.mu.RLock()
-	last := -1
-	for _, e := range sh.data[addr] {
-		if e.TxIdx >= txIdx {
-			break
-		}
-		last = e.TxIdx
-	}
-	sh.mu.RUnlock()
-	return last
-}
-
 // GetTxDelta returns this specific tx's delta.
 func (s *MVBalanceStore) GetTxDelta(addr common.Address, txIdx int) (add, sub uint256.Int, found bool) {
 	sh := s.shard(addr)

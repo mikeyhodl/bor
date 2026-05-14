@@ -27,7 +27,6 @@ func (s *mockV2State) ValidateCategory() string {
 	}
 	return "storage"
 }
-func (s *mockV2State) IsBaseOnly() bool                        { return false }
 func (s *mockV2State) MarkEstimate()                           {}
 func (s *mockV2State) CleanupEstimate([]Key, []common.Address) {}
 func (s *mockV2State) GetWriteKeys() []Key                     { return nil }
@@ -225,7 +224,6 @@ type panickingV2State struct{}
 
 func (s *panickingV2State) Validate() bool                          { panic("synthetic validation panic") }
 func (s *panickingV2State) ValidateCategory() string                { return "" }
-func (s *panickingV2State) IsBaseOnly() bool                        { return false }
 func (s *panickingV2State) MarkEstimate()                           {}
 func (s *panickingV2State) CleanupEstimate([]Key, []common.Address) {}
 func (s *panickingV2State) GetWriteKeys() []Key                     { return nil }

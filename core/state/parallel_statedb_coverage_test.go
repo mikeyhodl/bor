@@ -175,30 +175,6 @@ func TestPDB_GetWriteKeys_BalAddrs(t *testing.T) {
 	}
 }
 
-// TestPDB_IsBaseOnly_True returns true when the tx read only base (no MVStore
-// dependencies).
-func TestPDB_IsBaseOnly_True(t *testing.T) {
-	pdb, _, _ := newTestPDB(t, 0)
-	pdb.EnableReadTracking()
-	pdb.GetNonce(common.HexToAddress("0x1")) // falls through to base → WriterIdx == -1
-	if !pdb.IsBaseOnly() {
-		t.Fatal("IsBaseOnly: expected true for pure base read")
-	}
-}
-
-// TestPDB_IsBaseOnly_False returns false when any read depends on a prior tx.
-func TestPDB_IsBaseOnly_False(t *testing.T) {
-	pdb, store, _ := newTestPDB(t, 5)
-	pdb.EnableReadTracking()
-	addr := common.HexToAddress("0x1")
-	key := blockstm.NewSubpathKey(addr, NoncePath)
-	store.WriteInc(key, 2, 0, uint64(9))
-	pdb.GetNonce(addr) // records WriterIdx=2
-	if pdb.IsBaseOnly() {
-		t.Fatal("IsBaseOnly: expected false when a prior-tx read occurred")
-	}
-}
-
 // TestPDB_SetDeferMVWrites flips the flag and is read by flush helpers.
 func TestPDB_SetDeferMVWrites(t *testing.T) {
 	pdb, store, _ := newTestPDB(t, 0)

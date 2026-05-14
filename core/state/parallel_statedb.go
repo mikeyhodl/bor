@@ -487,16 +487,6 @@ func (s *ParallelStateDB) GetBalAddrs() []common.Address {
 	return result
 }
 
-// IsBaseOnly returns true if all reads came from the base state (no MVStore deps).
-func (s *ParallelStateDB) IsBaseOnly() bool {
-	for j := range s.StoreReads {
-		if s.StoreReads[j].WriterIdx >= 0 {
-			return false
-		}
-	}
-	return true
-}
-
 // ---------- Existence ----------
 
 // priorDestructedAt returns the block-order tx index of the most recent

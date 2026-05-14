@@ -1201,17 +1201,6 @@ func TestPDB_DiagnoseBalanceRead_PassPath(t *testing.T) {
 	}
 }
 
-// TestPDB_IsBaseOnly_WriterIdxZero pins the `>= 0` boundary at line 779:
-// a read from tx 0 (writerIdx == 0) must still register as non-base-only.
-func TestPDB_IsBaseOnly_WriterIdxZero(t *testing.T) {
-	pdb, _, _ := newTestPDB(t, 5)
-	pdb.EnableReadTracking()
-	pdb.StoreReads = append(pdb.StoreReads, StoreReadDesc{WriterIdx: 0, WriterInc: 0})
-	if pdb.IsBaseOnly() {
-		t.Fatal("writerIdx=0 must NOT be classified as base-only")
-	}
-}
-
 // TestPDB_SubRefund_BoundaryEqual pins the `>` boundary at line 1073: when
 // gas equals refund, SubRefund must succeed and zero the counter.
 func TestPDB_SubRefund_BoundaryEqual(t *testing.T) {

@@ -74,28 +74,6 @@ func TestMVBalanceStore_GetTxDeltaMissing(t *testing.T) {
 	}
 }
 
-// TestMVBalanceStore_LastWriter returns the highest tx index strictly
-// less than txIdx that has a delta for addr.
-func TestMVBalanceStore_LastWriter(t *testing.T) {
-	s := NewMVBalanceStore()
-	addr := mvBalAddr(1)
-	s.WriteDelta(addr, 1, u(1), u(0))
-	s.WriteDelta(addr, 4, u(1), u(0))
-
-	if got := s.LastWriter(addr, 10); got != 4 {
-		t.Fatalf("LastWriter(10): got %d, want 4", got)
-	}
-	if got := s.LastWriter(addr, 4); got != 1 {
-		t.Fatalf("LastWriter(4): got %d, want 1", got)
-	}
-	if got := s.LastWriter(addr, 1); got != -1 {
-		t.Fatalf("LastWriter(1): got %d, want -1", got)
-	}
-	if got := s.LastWriter(mvBalAddr(99), 10); got != -1 {
-		t.Fatalf("LastWriter(missing addr): got %d, want -1", got)
-	}
-}
-
 // TestMVBalanceStore_ZeroDelta preserves the entry but zeros its amounts —
 // used when MarkEstimate runs before re-execution.
 func TestMVBalanceStore_ZeroDelta(t *testing.T) {
@@ -108,10 +86,6 @@ func TestMVBalanceStore_ZeroDelta(t *testing.T) {
 	add, sub, found := s.GetTxDelta(addr, 2)
 	if !found || add.Uint64() != 0 || sub.Uint64() != 0 {
 		t.Fatalf("after ZeroDelta: got (%d, %d, %v), want (0, 0, true)", add.Uint64(), sub.Uint64(), found)
-	}
-	// LastWriter still finds the (zeroed) tx — entry retained.
-	if got := s.LastWriter(addr, 5); got != 2 {
-		t.Fatalf("LastWriter after zero: got %d, want 2 (entry retained)", got)
 	}
 }
 
@@ -158,31 +132,6 @@ func TestMVBalanceStore_WriteDelta_OutOfOrderInsertion(t *testing.T) {
 	a10, _, found10 := s.GetTxDelta(addr, 10)
 	if !found10 || a10.Uint64() != 100 {
 		t.Fatalf("GetTxDelta(10): got (%d, %v), want (100, true)", a10.Uint64(), found10)
-	}
-}
-
-// TestMVBalanceStore_LastWriter_LockReleased verifies LastWriter's
-// RUnlock is reachable on every code path. A subsequent writer would
-// deadlock if LastWriter forgot to RUnlock — test by chaining a writer
-// after a reader.
-func TestMVBalanceStore_LastWriter_LockReleased(t *testing.T) {
-	s := NewMVBalanceStore()
-	addr := mvBalAddr(1)
-	s.WriteDelta(addr, 1, u(1), nil)
-
-	if got := s.LastWriter(addr, 5); got != 1 {
-		t.Fatalf("LastWriter: got %d, want 1", got)
-	}
-	// Acquire write lock — would deadlock if LastWriter forgot to RUnlock.
-	done := make(chan struct{})
-	go func() {
-		s.WriteDelta(addr, 2, u(2), nil)
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-timeAfter(2):
-		t.Fatal("WriteDelta after LastWriter timed out — RUnlock missing?")
 	}
 }
 
