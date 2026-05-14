@@ -37,13 +37,9 @@ type SafeBase struct {
 	// for slots already warmed by the prefetcher.
 	SharedStorageCache *sync.Map // storageCacheKey{addr,slot} → common.Hash
 
-	// OverlayStorageCache is the V2-owned, lock-free map holding storage
-	// values written by pre-block system calls (EIP-4788 BeaconRoots,
-	// EIP-2935 ParentBlockHash, etc.) BEFORE V2 workers execute. It is
-	// populated by StateDB.OverlayPendingStorageInto and read by GetState
-	// strictly before SharedStorageCache — the prefetcher cannot reach it,
-	// so a concurrent trieReader.Storage Load→read→Store cannot clobber
-	// the post-system-call value.
+	// OverlayStorageCache holds pre-block system-call writes (EIP-4788/2935).
+	// GetState consults it ahead of SharedStorageCache so the prefetcher's
+	// trieReader Load→read→Store cannot clobber the overlay value.
 	OverlayStorageCache *sync.Map // stateKey{addr,slot} → common.Hash
 
 	// readDelay is set from TestReadDelay at creation time.

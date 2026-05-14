@@ -688,9 +688,7 @@ func (s *ParallelStateDB) GetNonce(addr common.Address) uint64 {
 		return 0
 	}
 	if suicideIdx >= 0 {
-		// Destroyed and no later nonce writer → 0 (matches serial post-Finalise).
-		// Record the miss so a later writer for nonceKey invalidates this tx —
-		// mirrors GetCodeHash's unconditional record-on-miss pattern.
+		// Destroyed and no later writer → 0; record so a later writer invalidates.
 		s.recordStoreRead(nonceKey, -1, 0, uint64(0))
 		return 0
 	}
@@ -731,8 +729,6 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 		return nil
 	}
 	if suicideIdx >= 0 {
-		// Record the miss so a later code writer invalidates this tx —
-		// mirrors GetCodeHash's unconditional record-on-miss pattern.
 		s.recordStoreRead(codeKey, -1, 0, []byte(nil))
 		return nil
 	}
@@ -853,11 +849,8 @@ func (s *ParallelStateDB) GetState(addr common.Address, key common.Hash) common.
 		return common.Hash{}
 	}
 	if suicideIdx >= 0 {
-		// Destroyed and no later writer → wiped. Don't fall through to
-		// base: even if recreated, slots from before destruction don't
-		// come back. Record the miss so a later writer for stateKey
-		// invalidates this tx — mirrors GetCodeHash's unconditional
-		// record-on-miss pattern.
+		// Destroyed and no later writer → wiped. Don't fall through to base:
+		// recreation doesn't restore pre-destruction slots.
 		s.recordStoreRead(stateKey, -1, 0, common.Hash{})
 		return common.Hash{}
 	}
@@ -886,12 +879,8 @@ func (s *ParallelStateDB) GetCommittedState(addr common.Address, key common.Hash
 		// else: destroyed after this write → result stays zero
 	} else {
 		if suicideIdx < 0 {
-			// No writer and no destruction → fall through to base.
 			result = s.base.GetCommittedState(addr, key)
 		}
-		// Record unconditionally on miss — including the destructed-miss
-		// case — so a later writer for mvKey invalidates this tx. Mirrors
-		// GetCodeHash's record-on-miss pattern.
 		s.recordStoreRead(mvKey, -1, 0, result)
 	}
 	if s.committedCache == nil {
@@ -1172,15 +1161,9 @@ func (s *ParallelStateDB) Inner() *StateDB { return s.rawBase }
 
 func (s *ParallelStateDB) PointCache() *utils.PointCache { return s.rawBase.PointCache() }
 
-// Witness returns the underlying base StateDB's witness. The share-by-
-// reference invariant — that parallelStatedb / readBase / pool copies /
-// finalDB all see the same *Witness — is established by the caller
-// (V2StateProcessor.Process) via readBase.SetWitness(finalDB.Witness())
-// after statedb.Copy(), because Copy() itself deep-copies the witness.
-// Returning rawBase.Witness() here lets the EVM's BLOCKHASH opcode call
-// AddBlockHash on the right object during V2 execution. The Witness
-// type guards its mutations internally, so concurrent worker calls are
-// safe.
+// Witness returns the shared *Witness so BLOCKHASH writes from V2 workers
+// land where finalDB sees them. The share is established by the caller
+// after statedb.Copy() (which deep-copies). Witness locks its own mutations.
 func (s *ParallelStateDB) Witness() *stateless.Witness { return s.rawBase.Witness() }
 func (s *ParallelStateDB) AccessEvents() *AccessEvents { return nil }
 

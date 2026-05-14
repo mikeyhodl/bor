@@ -786,11 +786,6 @@ func ExecuteV2BlockSTM(
 	finalDB *state.StateDB,
 	conflictAddrs map[common.Address]bool,
 ) *V2ExecutionResult {
-	// Surface signature-recovery failures via ExecErrIdx/ExecErr — the
-	// production caller (V2StateProcessor.Process) aborts the block on
-	// non-negative ExecErrIdx, matching the serial path. Without this short-
-	// circuit, a nil Msg would slip into applyMessage and trigger a recovered
-	// panic with a less specific error.
 	if idx, err := recoverTaskMessages(tasks, chainConfig, blockCtx); err != nil {
 		return &V2ExecutionResult{
 			Pdbs:              make([]*state.ParallelStateDB, len(tasks)),
@@ -876,10 +871,8 @@ func ExecuteV2BlockSTM(
 	}
 }
 
-// recoverTaskMessages performs parallel signature recovery for any task
-// whose Msg is nil. No-op if all tasks already have pre-computed messages.
-// On failure, returns the lowest task index that failed and the error from
-// TransactionToMessage; (-1, nil) on success.
+// recoverTaskMessages signature-recovers any task with nil Msg. Returns
+// the lowest failing task index and error; (-1, nil) on success.
 func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockCtx vm.BlockContext) (int, error) {
 	needRecovery := false
 	for i := range tasks {
@@ -924,17 +917,10 @@ func recoverTaskMessages(tasks []V2Task, chainConfig *params.ChainConfig, blockC
 	return firstIdx, firstErr
 }
 
-// wireStorageCaches points SafeBase at the prefetcher's trieReader cache
-// (fast path for slots already warmed) and at a V2-owned overlay map
-// holding pre-block system-call writes.
-//
-// The overlay must NOT live in the trieReader cache: trieReader.Storage
-// does a non-atomic Load → trie-read → plain Store, so a concurrent trie
-// read that lands after the overlay would clobber the post-system-call
-// value with the raw trie zero. Parking the overlay in a V2-owned map the
-// prefetcher cannot reach — and having SafeBase consult it before the
-// shared trie cache — keeps EIP-4788 BeaconRoots and EIP-2935
-// ParentBlockHash reads coherent with serial.
+// wireStorageCaches gives SafeBase the prefetcher's trie cache (fast path)
+// and a separate V2-owned overlay for pre-block system-call writes. The
+// overlay can't live in the trie cache: trieReader.Storage's non-atomic
+// Load→read→Store can land after the overlay and clobber it with a zero.
 func wireStorageCaches(base *state.StateDB, sb *state.SafeBase) {
 	if sc := base.StorageCache(); sc != nil {
 		sb.SharedStorageCache = sc
@@ -993,9 +979,6 @@ func newV2SettleFn(tasks []V2Task, env *v2Env, finalDB *state.StateDB,
 	isByzantium := chainConfig.IsByzantium(blockCtx.BlockNumber)
 	isEIP158 := chainConfig.IsEIP158(blockCtx.BlockNumber)
 	return func(txIdx int, st blockstm.V2TxState) {
-		// Defense in depth: finishReexec already skips nil-state idx, but if
-		// any future caller routes a nil interface here the type assertion
-		// would panic in a goroutine with no recover.
 		if st == nil {
 			return
 		}
@@ -1132,9 +1115,7 @@ func (p *V2StateProcessor) Process(block *types.Block, statedb *state.StateDB, c
 	finalDB.StopPrefetcher()
 	finalDB.StartPrefetcher("v2-settle", prevWitness, nil)
 	finalDB.SkipTimers()
-	// Copy() deep-copies the witness; restore share-by-reference so V2
-	// workers' BLOCKHASH writes (via PDB.Witness() → rawBase.Witness())
-	// reach finalDB. Headers has no equivalent of CollectStateWitness.
+	// Copy() deep-copies the witness; re-share so BLOCKHASH writes reach finalDB.
 	readBase := statedb.Copy()
 	readBase.SetWitness(prevWitness)
 	store := blockstm.NewMVStore()

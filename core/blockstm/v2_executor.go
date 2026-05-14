@@ -513,10 +513,7 @@ func (x *v2ExecCtx) finishReexec(reexecDone []chan struct{}, idx int) {
 	reexecDone[idx] = nil
 	x.finalized[idx].Store(true)
 	close(x.completionCh[idx])
-	// Skip settle when the re-exec goroutine returned early on ctx.Done()
-	// without populating x.states[idx]. Sending a nil-state idx into the
-	// settle channel would crash the settle goroutine on the type
-	// assertion in newV2SettleFn (no recover there).
+	// ctx cancellation can leave x.states[idx] nil — settleFn would panic.
 	if x.chSettle != nil && x.states[idx] != nil {
 		x.chSettle <- idx
 	}
@@ -544,9 +541,6 @@ func (x *v2ExecCtx) finalizePass(i int) {
 func (x *v2ExecCtx) dispatchReexec(i int) chan struct{} {
 	x.vfailCount.Add(1)
 	x.vfailIdxs = append(x.vfailIdxs, i)
-	// x.states[i] can be nil if the worker returned early on ctx cancellation
-	// (lines 410/418) before populating it. The non-deterministic select in
-	// validateOne may still pick execDone[i] over ctx.Done(), routing here.
 	if x.states[i] != nil {
 		if cat := x.states[i].ValidateCategory(); cat != "" {
 			x.vfailCatsMu.Lock()

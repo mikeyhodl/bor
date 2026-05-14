@@ -855,7 +855,7 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 		statedb  *state.StateDB
 		counter  *metrics.Counter
 		parallel bool
-		vtime    time.Duration // ValidateState wall time on this goroutine
+		vtime    time.Duration
 	}
 
 	var resultChanLen int = 2
@@ -914,8 +914,6 @@ func (bc *BlockChain) ProcessBlock(block *types.Block, parent *types.Header, wit
 				err = bc.validator.ValidateState(block, statedb, res, false)
 				localVtime = time.Since(vstart)
 			}
-			// Mirror V2's err-or-ctx stop (4c688e4) so V1's subfetchers
-			// don't outlive a discarded errored result across pathdb commit.
 			if err != nil || ctx.Err() != nil {
 				statedb.StopPrefetcher()
 			}

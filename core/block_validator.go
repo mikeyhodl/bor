@@ -29,13 +29,9 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
-// intermediateRootTimer records the IntermediateRoot computation time in
-// ValidateState. On close V1/V2 races inside BlockChain.ProcessBlock, the
-// loser can reach ValidateState before cancel() preempts it and record a
-// second sample for the same block. Mean/p99 stay representative; Count
-// and rate may inflate up to ~2x on race-prone workloads. The cost of a
-// stricter "winner-only" gate is a Validator interface change, which
-// isn't justified by an observability-only side effect.
+// intermediateRootTimer may record 2 samples per block on close V1/V2
+// races where the loser also reaches ValidateState before cancel().
+// Count and rate inflate up to ~2x; mean/p99 stay representative.
 var intermediateRootTimer = metrics.NewRegisteredTimer("chain/intermediateroot", nil)
 
 // BlockValidator is responsible for validating block headers, uncles and

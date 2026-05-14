@@ -29,25 +29,11 @@ type writeBloom struct {
 }
 
 // bloomHashes computes 3 independent bit positions from a Key.
-//
-// All three hashes draw from byte ranges that are populated for every key
-// class (address-only, subpath, state). The Key layout is:
-//
-//	[0:20]  address
-//	[20:52] storage hash (zero for address-only and subpath keys)
-//	[52]    subpath byte (zero for address-only and state keys)
-//	[53]    type byte
-//
-// h1 covers the address prefix and h2 covers the address tail — both are
-// always populated, so neither dimension collapses to a constant for any
-// key class. h3 mixes the address middle with the hash tail and the
-// subpath/type bytes, so address-only / subpath / state keys are all
-// distinguishable in the third dimension as well.
-//
-// bloomMask is 15 bits wide, so each hash term is XOR-folded back from its
-// 32-bit span before masking — otherwise the bits 15-31 portion (including
-// the type byte k[53] in h3) would be discarded by the mask and contribute
-// zero entropy.
+// Key layout: [0:20] address, [20:52] storage hash, [52] subpath byte,
+// [53] type byte. h1/h2 cover the address; h3 mixes address middle with
+// the hash tail and subpath/type bytes so all key classes diverge in
+// the third dimension. bloomFold mixes the upper bits into the kept
+// 15 so terms shifted past bit 14 still contribute.
 func bloomHashes(k Key) (uint, uint, uint) {
 	_ = k[53] // bounds check hint (covers all reads below)
 	h1 := uint(k[0]) | uint(k[1])<<8 | uint(k[2])<<16 | uint(k[3])<<24
@@ -59,9 +45,6 @@ func bloomHashes(k Key) (uint, uint, uint) {
 	return bloomFold(h1), bloomFold(h2), bloomFold(h3)
 }
 
-// bloomFold mixes the upper bits of a 32-bit hash into the low 15 bits
-// before masking, so bytes shifted past bit 14 still contribute entropy
-// (in particular the type byte k[53] in h3's <<24 slot).
 func bloomFold(h uint) uint {
 	return (h ^ (h >> 15) ^ (h >> 30)) & bloomMask
 }
@@ -446,17 +429,9 @@ func ValidateVersion(txIdx int, lastInputOutput *TxnInputOutput, versionedData *
 	valid = true
 
 	for _, rd := range lastInputOutput.ReadSet(txIdx) {
-		// V1 is no longer the production processor (NewParallelBlockChain
-		// wires V2 since the BlockSTM v2 work) — this path is reached only
-		// by the V1 differential tests and the V1 mainnet-witness baseline.
-		// Address keys are written by every getStateObject deep-copy and
-		// also by account creation (statedb.createObject / CreateContract).
-		// Validating them in V1 produces a high rate of false vfails on
-		// the differential corpus from incidental concurrent account
-		// access — skip them to keep the V1 baseline reasonable to run.
-		// V2 has its own validation path (parallel_statedb_validate.go),
-		// which does not use this short-circuit and correctly catches
-		// cross-tx creation reads.
+		// V1 is test-only post-PR; skipping address-key reads suppresses
+		// false vfails from incidental concurrent account access. V2's
+		// validation path doesn't share this short-circuit.
 		if rd.Path.IsAddress() {
 			continue
 		}
