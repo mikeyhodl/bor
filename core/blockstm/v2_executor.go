@@ -513,7 +513,11 @@ func (x *v2ExecCtx) finishReexec(reexecDone []chan struct{}, idx int) {
 	reexecDone[idx] = nil
 	x.finalized[idx].Store(true)
 	close(x.completionCh[idx])
-	if x.chSettle != nil {
+	// Skip settle when the re-exec goroutine returned early on ctx.Done()
+	// without populating x.states[idx]. Sending a nil-state idx into the
+	// settle channel would crash the settle goroutine on the type
+	// assertion in newV2SettleFn (no recover there).
+	if x.chSettle != nil && x.states[idx] != nil {
 		x.chSettle <- idx
 	}
 }

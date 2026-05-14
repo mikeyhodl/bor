@@ -993,6 +993,12 @@ func newV2SettleFn(tasks []V2Task, env *v2Env, finalDB *state.StateDB,
 	isByzantium := chainConfig.IsByzantium(blockCtx.BlockNumber)
 	isEIP158 := chainConfig.IsEIP158(blockCtx.BlockNumber)
 	return func(txIdx int, st blockstm.V2TxState) {
+		// Defense in depth: finishReexec already skips nil-state idx, but if
+		// any future caller routes a nil interface here the type assertion
+		// would panic in a goroutine with no recover.
+		if st == nil {
+			return
+		}
 		pdb := st.(*state.ParallelStateDB)
 		if pdb.Panicked {
 			if *panickedIdx < 0 {

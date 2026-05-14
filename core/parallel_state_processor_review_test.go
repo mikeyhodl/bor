@@ -130,6 +130,39 @@ func TestV2SettleFn_SkipsPanickedPDB(t *testing.T) {
 	}
 }
 
+// TestV2SettleFn_NilStateIsNoOp pins the defense-in-depth nil guard.
+// finishReexec already filters nil x.states[idx] out of the chSettle
+// stream, but if a future caller wires the settle goroutine differently
+// the type assertion `st.(*state.ParallelStateDB)` would panic on a nil
+// interface (the settle goroutine has no recover, so the panic crashes
+// the node). The guard returns early instead — no panic, no mutation,
+// panickedIdx untouched.
+func TestV2SettleFn_NilStateIsNoOp(t *testing.T) {
+	coinbase := common.HexToAddress("0xCB")
+	env, finalDB, _, _, receipts, logs, totalUsedGas, panickedIdx, blockCtx, cc := newV2SettleTestEnv(t, coinbase)
+
+	tx, msg := makeDummyTx(t, 0)
+	tasks := []V2Task{{Index: 0, Tx: tx, Msg: msg}}
+	var execErrIdx int = -1
+	var execErr error
+	settleFn := newV2SettleFn(tasks, env, finalDB, blockCtx, common.Hash{}, cc, receipts, logs, totalUsedGas, panickedIdx, &execErrIdx, &execErr)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("settleFn panicked on nil state: %v", r)
+		}
+	}()
+	settleFn(0, nil)
+
+	if *panickedIdx != -1 {
+		t.Fatalf("nil-state settle bumped panickedIdx to %d; want -1 (untouched)", *panickedIdx)
+	}
+	if len(*receipts) != 0 || len(*logs) != 0 || *totalUsedGas != 0 {
+		t.Fatalf("nil-state settle mutated outputs: receipts=%d logs=%d gas=%d",
+			len(*receipts), len(*logs), *totalUsedGas)
+	}
+}
+
 // TestV2SettleFn_RecordsFirstPanickedIdx verifies that the FIRST panicked
 // index wins — subsequent panicked txs must not overwrite it. This matters
 // when validation surfaces multiple panics (rare but possible), so the
