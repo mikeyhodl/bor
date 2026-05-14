@@ -1172,11 +1172,13 @@ func (s *ParallelStateDB) Inner() *StateDB { return s.rawBase }
 
 func (s *ParallelStateDB) PointCache() *utils.PointCache { return s.rawBase.PointCache() }
 
-// Witness returns the underlying base StateDB's witness. The same witness
-// pointer is shared by all V2 path StateDBs (parallelStatedb / readBase /
-// pool copies / finalDB) because StateDB.Copy() shares the witness by
-// reference. Returning it here lets the EVM's BLOCKHASH opcode call
-// AddBlockHash on the right witness during V2 execution. The Witness
+// Witness returns the underlying base StateDB's witness. The share-by-
+// reference invariant — that parallelStatedb / readBase / pool copies /
+// finalDB all see the same *Witness — is established by the caller
+// (V2StateProcessor.Process) via readBase.SetWitness(finalDB.Witness())
+// after statedb.Copy(), because Copy() itself deep-copies the witness.
+// Returning rawBase.Witness() here lets the EVM's BLOCKHASH opcode call
+// AddBlockHash on the right object during V2 execution. The Witness
 // type guards its mutations internally, so concurrent worker calls are
 // safe.
 func (s *ParallelStateDB) Witness() *stateless.Witness { return s.rawBase.Witness() }

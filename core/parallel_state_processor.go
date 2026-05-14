@@ -1126,7 +1126,11 @@ func (p *V2StateProcessor) Process(block *types.Block, statedb *state.StateDB, c
 	finalDB.StopPrefetcher()
 	finalDB.StartPrefetcher("v2-settle", prevWitness, nil)
 	finalDB.SkipTimers()
+	// Copy() deep-copies the witness; restore share-by-reference so V2
+	// workers' BLOCKHASH writes (via PDB.Witness() → rawBase.Witness())
+	// reach finalDB. Headers has no equivalent of CollectStateWitness.
 	readBase := statedb.Copy()
+	readBase.SetWitness(prevWitness)
 	store := blockstm.NewMVStore()
 	bals := blockstm.NewMVBalanceStore()
 

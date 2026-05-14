@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/blockstm"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
@@ -1874,5 +1875,55 @@ func TestPDB_DestructedMiss_LaterWriterInvalidates(t *testing.T) {
 
 	if pdb.Validate() {
 		t.Fatal("Validate=true after a later writer for the destructed-miss key — the reader settles a stale zero while serial would observe the new value")
+	}
+}
+
+// TestPDB_Witness_SharedAcrossCopyViaSetWitness pins the share-by-reference
+// invariant that V2StateProcessor.Process establishes between finalDB and
+// readBase. StateDB.Copy() deep-copies the witness (statedb.go:1294), so a
+// fresh Copy()'d statedb sees a distinct *Witness; readBase.SetWitness must
+// be threaded immediately after the Copy() to restore identity.
+//
+// Without the SetWitness restore, V2 workers writing to PDB.Witness()
+// (BLOCKHASH path) target the orphan witness on readBase; finalDB.Witness()
+// never observes the entry because Headers has no equivalent of the
+// CollectStateWitness / CollectCodeWitness merge.
+func TestPDB_Witness_SharedAcrossCopyViaSetWitness(t *testing.T) {
+	memdb := rawdb.NewMemoryDatabase()
+	tdb := triedb.NewDatabase(memdb, triedb.HashDefaults)
+	finalDB, err := New(types.EmptyRootHash, NewDatabase(tdb, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	witness := &stateless.Witness{
+		Headers: []*types.Header{},
+		Codes:   make(map[string]struct{}),
+		State:   make(map[string]struct{}),
+	}
+	finalDB.SetWitness(witness)
+
+	// Deep copy → readBase carries its own *Witness; the bug surfaces here
+	// without the SetWitness call.
+	readBase := finalDB.Copy()
+	if readBase.Witness() == finalDB.Witness() {
+		t.Fatal("StateDB.Copy() unexpectedly returned a shared witness; bug premise no longer holds")
+	}
+	// The V2 processor's fix: re-share the witness pointer.
+	readBase.SetWitness(finalDB.Witness())
+
+	// PDB.Witness() delegates to rawBase (readBase) — must return the same
+	// object finalDB sees.
+	pdb := NewParallelStateDB(0, NewSafeBase(readBase, 2), blockstm.NewMVStore(), blockstm.NewMVBalanceStore())
+	if pdb.Witness() != finalDB.Witness() {
+		t.Fatal("PDB.Witness() identity diverged from finalDB.Witness() — BLOCKHASH writes would land in the wrong witness")
+	}
+
+	// End-to-end: appending a header via the PDB-visible Witness must be
+	// observable through finalDB.Witness().
+	header := &types.Header{Number: big.NewInt(42)}
+	pdb.Witness().Headers = append(pdb.Witness().Headers, header)
+	got := finalDB.Witness().Headers
+	if len(got) != 1 || got[0] != header {
+		t.Fatalf("finalDB.Witness().Headers = %v; want [header(42)] via PDB write", got)
 	}
 }
