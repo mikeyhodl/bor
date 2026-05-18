@@ -121,15 +121,16 @@ func ExecuteV2BlockSTM(
 	startTime := time.Now()
 
 	taskCh, wg := x.startWorkers()
-	x.startTaskDispatcher(taskCh)
+	dispatcherDone := x.startTaskDispatcher(taskCh)
 	settleWg, settleStart, settleEnd := x.startSettlement(settleFn)
 
 	valDone := make(chan struct{})
 	go x.runValidationLoop(valDone)
 
-	<-valDone     // wait for validation to finish (dispatches re-executions to workers)
-	close(taskCh) // now safe to close — no more re-executions
-	wg.Wait()     // wait for workers to exit
+	<-valDone        // validation finished — no more re-executions
+	<-dispatcherDone // wait for dispatcher to stop sending before closing taskCh
+	close(taskCh)
+	wg.Wait() // wait for workers to exit
 	settleWg.Wait()
 
 	return x.buildResult(startTime, settleStart, settleEnd)
@@ -448,8 +449,10 @@ func (x *v2ExecCtx) startWorkers() (chan int, *sync.WaitGroup) {
 // backpressure so at most numWorkers*InFlightTaskMultiplier tasks are in
 // flight at once. Stops dispatching when ctx is cancelled — the partial
 // result is intended to be discarded by the caller.
-func (x *v2ExecCtx) startTaskDispatcher(taskCh chan int) {
+func (x *v2ExecCtx) startTaskDispatcher(taskCh chan int) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		window := x.numWorkers * InFlightTaskMultiplier
 		for i := 0; i < x.n; i++ {
 			if x.ctx.Err() != nil {
@@ -469,6 +472,7 @@ func (x *v2ExecCtx) startTaskDispatcher(taskCh chan int) {
 			}
 		}
 	}()
+	return done
 }
 
 // startSettlement spawns the in-order settlement goroutine if settleFn
