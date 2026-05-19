@@ -5,8 +5,8 @@ go 1.26.3
 
 require (
 	github.com/0xPolygon/crand v1.0.3
-	github.com/0xPolygon/heimdall-v2 v0.6.0
-	github.com/0xPolygon/polyproto v0.0.7
+	github.com/0xPolygon/heimdall-v2 v0.7.1
+	github.com/0xPolygon/polyproto v0.0.8
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.3.2
 	github.com/BurntSushi/toml v1.4.0
 	github.com/JekaMas/go-grpc-net-conn v0.0.0-20220708155319-6aff21f2d13d
