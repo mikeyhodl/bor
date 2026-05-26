@@ -68,7 +68,7 @@ func (s *fakeSpanner) GetCurrentValidatorsByHash(ctx context.Context, headerHash
 func (s *fakeSpanner) GetCurrentValidatorsByBlockNrOrHash(ctx context.Context, _ rpc.BlockNumberOrHash, _ uint64) ([]*valset.Validator, error) {
 	return s.vals, nil
 }
-func (s *fakeSpanner) CommitSpan(ctx context.Context, _ borTypes.Span, _ []stakeTypes.MinimalVal, _ []stakeTypes.MinimalVal, _ vm.StateDB, _ *types.Header, _ core.ChainContext) error {
+func (s *fakeSpanner) CommitSpan(ctx context.Context, _ borTypes.Span, _ []stakeTypes.MinimalVal, _ []stakeTypes.MinimalVal, _ vm.StateDB, _ *types.Header, _ core.ChainContext, _ vm.Config) error {
 	if s.shouldFailCommit {
 		return errors.New("span commit failed")
 	}
@@ -81,7 +81,7 @@ type failingHeimdallClient struct{}
 // failingGenesisContract simulates GenesisContract failures
 type failingGenesisContract struct{}
 
-func (f *failingGenesisContract) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chCtx statefull.ChainContext) (uint64, error) {
+func (f *failingGenesisContract) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chCtx statefull.ChainContext, vmCfg vm.Config) (uint64, error) {
 	return 0, errors.New("commit state failed")
 }
 
@@ -2366,7 +2366,7 @@ func TestNew(t *testing.T) {
 
 	sp := &fakeSpanner{vals: []*valset.Validator{{Address: common.HexToAddress("0x1"), VotingPower: 1}}}
 
-	engine := New(chainCfg, db, nil, sp, nil, nil, nil, false, 0)
+	engine := New(chainCfg, db, nil, sp, nil, nil, nil, false, 0, vm.Config{})
 	require.NotNil(t, engine)
 	require.NotNil(t, engine.recents)
 	require.NotNil(t, engine.signatures)
@@ -2386,7 +2386,7 @@ func TestNew_DefaultSprintFallback(t *testing.T) {
 	db := rawdb.NewMemoryDatabase()
 	sp := &fakeSpanner{vals: []*valset.Validator{{Address: common.HexToAddress("0x1"), VotingPower: 1}}}
 
-	engine := New(chainCfg, db, nil, sp, nil, nil, nil, false, 0)
+	engine := New(chainCfg, db, nil, sp, nil, nil, nil, false, 0, vm.Config{})
 	require.NotNil(t, engine)
 	require.Equal(t, uint64(64), engine.config.CalculateSprint(0))
 	require.Equal(t, uint64(64), engine.chainConfig.Bor.CalculateSprint(0))
@@ -2401,7 +2401,7 @@ func TestNew_DefaultAuthorizedSignerReturnsUnauthorizedError(t *testing.T) {
 		Period: map[string]uint64{"0": 2},
 	}
 	chainCfg := &params.ChainConfig{ChainID: big.NewInt(1), Bor: borCfg}
-	engine := New(chainCfg, rawdb.NewMemoryDatabase(), nil, &fakeSpanner{}, nil, nil, nil, false, 0)
+	engine := New(chainCfg, rawdb.NewMemoryDatabase(), nil, &fakeSpanner{}, nil, nil, nil, false, 0, vm.Config{})
 	defer func() {
 		require.NoError(t, engine.Close())
 	}()
@@ -3539,7 +3539,7 @@ type mockGenesisContractForCommitStatesIndore struct {
 	gasUsed     uint64
 }
 
-func (m *mockGenesisContractForCommitStatesIndore) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chCtx statefull.ChainContext) (uint64, error) {
+func (m *mockGenesisContractForCommitStatesIndore) CommitState(event *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chCtx statefull.ChainContext, vmCfg vm.Config) (uint64, error) {
 	return m.gasUsed, nil
 }
 
@@ -4207,7 +4207,7 @@ func TestNew_WithHeimdallClient(t *testing.T) {
 	gc := &mockGenesisContractForCommitStatesIndore{lastStateID: 0}
 	hc := &mockHeimdallClient{span: nil}
 
-	bor := New(cfg, db, nil, sp, hc, nil, gc, false, 0)
+	bor := New(cfg, db, nil, sp, hc, nil, gc, false, 0, vm.Config{})
 	require.NotNil(t, bor)
 	require.NotNil(t, bor.HeimdallClient)
 	require.NoError(t, bor.Close())

@@ -250,6 +250,7 @@ func BorRLP(header *types.Header, c *params.BorConfig) []byte {
 type Bor struct {
 	chainConfig *params.ChainConfig // Chain config
 	config      *params.BorConfig   // Consensus engine configuration parameters for bor consensus
+	vmConfig    vm.Config           // VM config (optional) for system transactions
 	db          ethdb.Database      // Database to store and retrieve snapshot checkpoints
 
 	recents               *ttlcache.Cache[common.Hash, *Snapshot]     // Snapshots for recent block to speed up reorgs
@@ -305,6 +306,7 @@ func New(
 	genesisContracts GenesisContract,
 	devFakeAuthor bool,
 	blockTime time.Duration,
+	vmConfig vm.Config,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -336,6 +338,7 @@ func New(
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
+		vmConfig:               vmConfig,
 		db:                     db,
 		ethAPI:                 ethAPI,
 		recents:                recents,
@@ -1218,7 +1221,11 @@ func (c *Bor) Finalize(chain consensus.ChainHeaderReader, header *types.Header, 
 
 	// Check if any hardfork needs change in genesis contract code. Note that we use
 	// the wrapped state here as it may have a hooked state db instance which can help
-	// in tracing if it's enabled.
+	// in tracing if it's enabled. Note: when live tracing of state-sync is active,
+	// OnCodeChange events from these block-alloc upgrades are emitted *inside* the
+	// state-sync tx's OnTxStart/OnTxEnd window in the caller's trace stream. This
+	// is a known minor attribution quirk; events are emitted correctly, only their
+	// containing tx-scope is the state-sync tx rather than a block-level system context.
 	if err = c.changeContractCodeIfNeeded(headerNumber, wrappedState); err != nil {
 		return nil, fmt.Errorf("error changing contract code: %w", err)
 	}
@@ -1744,7 +1751,7 @@ func (c *Bor) FetchAndCommitSpan(
 		)
 	}
 
-	return c.spanner.CommitSpan(ctx, minSpan, validators, producers, state, header, chain)
+	return c.spanner.CommitSpan(ctx, minSpan, validators, producers, state, header, chain, c.vmConfig)
 }
 
 // CommitStates commit states
@@ -1865,7 +1872,7 @@ func (c *Bor) CommitStates(
 		// we expect that this call MUST emit an event, otherwise we wouldn't make a receipt
 		// if the receiver address is not a contract then we'll skip the most of the execution and emitting an event as well
 		// https://github.com/0xPolygon/genesis-contracts/blob/master/contracts/StateReceiver.sol#L27
-		gasUsed, err = c.GenesisContractsClient.CommitState(eventRecord, state, header, chain)
+		gasUsed, err = c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c.vmConfig)
 		if err != nil {
 			return nil, err
 		}
