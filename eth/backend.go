@@ -300,6 +300,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
 		}
 	}
+	trieJournalDirectory := config.TrieJournalDirectory
+	if trieJournalDirectory == "" {
+		trieJournalDirectory = stack.ResolvePath("triedb")
+	}
+
 	var (
 		options = &core.BlockChainConfig{
 			TrieCleanLimit:    config.TrieCleanCache,
@@ -322,7 +327,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			// within the data directory. The corresponding paths will be either:
 			// - DATADIR/triedb/merkle.journal
 			// - DATADIR/triedb/verkle.journal
-			TrieJournalDirectory: stack.ResolvePath("triedb"),
+			TrieJournalDirectory: trieJournalDirectory,
 			StateSizeTracking:    config.EnableStateSizeTracking,
 		}
 	)
