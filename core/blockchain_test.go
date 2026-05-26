@@ -6045,7 +6045,7 @@ func TestSplitReceiptsAndDeriveFields(t *testing.T) {
 }
 
 // TestInsertReceiptChain_NilReceiptsNormalizedToEmptyList exercises the
-// snap-sync write path: InsertReceiptChain on receiving empty/nil reciepts
+// snap-sync write path: InsertReceiptChain on receiving empty/nil receipts
 // should write canonical RLP empty list (0xc0) to disk matching what
 // writeBlockWithState produces on the live-execution path.
 func TestInsertReceiptChain_NilReceiptsNormalizedToEmptyList(t *testing.T) {

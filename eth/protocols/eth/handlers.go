@@ -429,7 +429,7 @@ func ServiceGetReceiptsQuery69(chain *core.BlockChain, query GetReceiptsRequest)
 		// Track existence of bor receipts for encoding
 		var isBorReceiptPresent bool
 
-		// We atleast have some non-empty data for this block. Combine the receipts for encoding.
+		// We at least have some non-empty data for this block. Combine the receipts for encoding.
 		var blockReceipts []*types.ReceiptForStorage = make([]*types.ReceiptForStorage, 0)
 		if len(normalReceipts) != 0 {
 			blockReceipts = append(blockReceipts, normalReceiptsDecoded...)

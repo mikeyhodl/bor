@@ -432,7 +432,7 @@ func TestBlockReceiptsToNetwork68_EmptyReceipts(t *testing.T) {
 }
 
 // TestBlockReceiptsToNetwork68_MalformedInput_ReturnsError ensures that
-// error due to inavlid input (unparseable blob) is surfaced to the caller.
+// error due to invalid input (unparseable blob) is surfaced to the caller.
 func TestBlockReceiptsToNetwork68_MalformedInput_ReturnsError(t *testing.T) {
 	body := emptyBodyRLP()
 	// 0x81 0x02 is an RLP single-byte string (not a list).
@@ -468,7 +468,7 @@ func TestBlockReceiptsToNetwork69_EmptyReceipts(t *testing.T) {
 }
 
 // TestBlockReceiptsToNetwork69_MalformedInput_ReturnsError ensures that
-// error due to inavlid input (unparseable blob) is surfaced to the caller.
+// error due to invalid input (unparseable blob) is surfaced to the caller.
 func TestBlockReceiptsToNetwork69_MalformedInput_ReturnsError(t *testing.T) {
 	body := emptyBodyRLP()
 	noStateSync := func(int) bool { return false }
