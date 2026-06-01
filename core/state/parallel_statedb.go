@@ -2,6 +2,7 @@ package state
 
 import (
 	"math/big"
+	"slices"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -1116,7 +1117,9 @@ func (s *ParallelStateDB) AddLog(l *types.Log) {
 }
 
 func (s *ParallelStateDB) AddPreimage(hash common.Hash, preimage []byte) {
-	s.preimages[hash] = preimage
+	if _, ok := s.preimages[hash]; !ok {
+		s.preimages[hash] = slices.Clone(preimage)
+	}
 }
 
 func (s *ParallelStateDB) Logs() []*types.Log { return s.logs }
