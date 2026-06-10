@@ -610,8 +610,9 @@ func (s *ParallelStateDB) Exist(addr common.Address) bool {
 	if suicideIdx >= 0 {
 		// Most recent action was destruction. The account is gone unless
 		// a later tx implicitly recreated it via AddBalance (value
-		// transfer doesn't touch CreatePath, only MVBalanceStore) or by
-		// bumping its nonce (e.g. a 7702 delegation clear). GetBalance /
+		// transfer doesn't touch CreatePath, only MVBalanceStore) or via a
+		// bare nonce bump (SetNonce writes NoncePath, not CreatePath, so it
+		// lands here rather than the createIdx branch above). GetBalance /
 		// GetNonce record their own reads so validation catches drift.
 		if !s.GetBalance(addr).IsZero() {
 			return true
@@ -633,11 +634,13 @@ func (s *ParallelStateDB) Exist(addr common.Address) bool {
 	// Serial StateDB.Exist is getStateObject()!=nil, and an account with
 	// nonce>0 is not empty — so it exists. ParallelStateDB historically
 	// omitted this nonce check: an account made to exist purely by a prior
-	// in-block nonce bump (a sender increment, or a 7702 delegation clear —
-	// SetNonce writes NoncePath but NOT CreatePath) was reported absent.
-	// That flipped EIP-7702 applyAuthorization's Exist-gated 12500 refund and
-	// the new-account CALL surcharge, over-charging gas and splitting from
-	// serial. GetNonce records the read so validation now catches drift.
+	// in-block sender nonce increment (SetNonce writes NoncePath but NOT
+	// CreatePath) was reported absent. That flipped EIP-7702
+	// applyAuthorization's Exist-gated 12500 refund and the new-account CALL
+	// surcharge, over-charging gas and splitting from serial. (A 7702
+	// delegation clear is not this case: it also writes CreatePath because
+	// SetCode calls CreateAccount, so it returns at the createIdx branch
+	// above.) GetNonce records the read so validation now catches drift.
 	if s.GetNonce(addr) > 0 {
 		return true
 	}
