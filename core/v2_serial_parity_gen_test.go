@@ -96,8 +96,8 @@ var initialBalance = new(uint256.Int).Mul(uint256.NewInt(100), uint256.NewInt(1e
 var (
 	sdPairEntry  = common.HexToAddress("0x000000000000000000000000000000000000aaaa") // X
 	sdPairHelper = common.HexToAddress("0x000000000000000000000000000000000000cccc") // Z
-	sdPairPayout = common.HexToAddress("0x000000000000000000000000000000000000bbbb") // Y (EOA)
 
+	// Payout EOA Y (low bytes bbbb) lives only inside sdPairEntryCode below; no Go binding.
 	// if (msg.sender == Z) { selfdestruct(payable(Y)); }
 	// else { Z.call{value: 0}(""); payable(Y).transfer(10); }
 	sdPairEntryCode = common.FromHex("3373000000000000000000000000000000000000cccc146056575f5f5f5f5f73000000000000000000000000000000000000cccc5af1505f5f5f5f600a73000000000000000000000000000000000000bbbb5af150005b73000000000000000000000000000000000000bbbbff")
