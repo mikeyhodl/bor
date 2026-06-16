@@ -328,7 +328,7 @@ func (h *httpServer) enableRPC(apis []rpc.API, config httpConfig) error {
 	}
 
 	// Pool size from config bounds request concurrency (0 = unbounded fast path).
-	// Timeout 0: the pool's per-task timeout is unreliable, so WriteTimeout caps wall-time.
+	// The pool has no per-task timeout; request wall-time is bounded by WriteTimeout.
 	srv := rpc.NewServer("http", config.executionPoolSize, 0)
 	srv.SetBatchLimits(config.batchItemLimit, config.batchResponseSizeLimit)
 	if config.httpBodyLimit > 0 {
