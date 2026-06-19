@@ -71,7 +71,7 @@ func allocBytes(f func()) uint64 {
 func TestBorHeaderExtraDecodeKeepsTxDepsRaw(t *testing.T) {
 	const deps = 200_000
 
-	cfg := &params.ChainConfig{ChainID: big.NewInt(137), CancunBlock: big.NewInt(0)}
+	cfg := &params.ChainConfig{ChainID: big.NewInt(137), CancunBlock: big.NewInt(0), Bor: &params.BorConfig{ValenciaBlock: big.NewInt(0)}}
 	gasTarget, bfcd := uint64(30_000_000), uint64(8)
 	h := &Header{
 		Number: big.NewInt(1),
