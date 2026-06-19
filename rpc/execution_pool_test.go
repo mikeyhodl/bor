@@ -127,3 +127,56 @@ func TestChangeSizeZeroReentersFastPath(t *testing.T) {
 	assert.True(t, pool.fastPath.Load(), "ChangeSize(0) must re-enter the fast path")
 	assert.Equal(t, 0, pool.Size())
 }
+
+// TestSubmitShedsAtTimeout: at capacity, the configured timeout lets Submit run
+// fn unbounded instead of blocking the caller indefinitely.
+func TestSubmitShedsAtTimeout(t *testing.T) {
+	pool := NewExecutionPool(1, 50*time.Millisecond, "", false)
+	defer pool.Stop()
+
+	current, _, release, wg := submitBlockingTasks(pool, 1) // occupies the only slot
+	waitForAtomic(t, current, 1, time.Second)
+
+	ran := make(chan struct{})
+	go pool.Submit(context.Background(), func() error {
+		close(ran)
+		return nil
+	})
+
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("saturated pool must shed fn after the timeout, not block forever")
+	}
+
+	close(release)
+	wg.Wait()
+}
+
+// TestSubmitShedsOnCtxCancel: a cancelled ctx lets Submit run fn unbounded
+// instead of blocking on a saturated pool (timeout disabled).
+func TestSubmitShedsOnCtxCancel(t *testing.T) {
+	pool := NewExecutionPool(1, 0, "", false)
+	defer pool.Stop()
+
+	current, _, release, wg := submitBlockingTasks(pool, 1)
+	waitForAtomic(t, current, 1, time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ran := make(chan struct{})
+	go pool.Submit(ctx, func() error {
+		close(ran)
+		return nil
+	})
+
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("saturated pool must shed fn when ctx is cancelled")
+	}
+
+	close(release)
+	wg.Wait()
+}

@@ -57,9 +57,10 @@ func NewExecutionPool(initialSize int, timeout time.Duration, service string, re
 }
 
 // Submit runs fn, bounded to the pool size (fast path: unbounded). fn always
-// runs, so a caller that waits on its completion (the handler's WaitGroup) can't
-// hang.
-func (s *SafePool) Submit(_ context.Context, fn func() error) (<-chan error, bool) {
+// runs — the caller's WaitGroup counts on it — so at capacity it waits for a
+// slot, falling back to an unbounded run if ctx is cancelled or the configured
+// timeout elapses, so a saturated pool can't block the caller indefinitely.
+func (s *SafePool) Submit(ctx context.Context, fn func() error) (<-chan error, bool) {
 	semPtr := s.sem.Load()
 	if s.fastPath.Load() || semPtr == nil {
 		go func() {
@@ -70,17 +71,35 @@ func (s *SafePool) Submit(_ context.Context, fn func() error) (<-chan error, boo
 	}
 
 	sem := *semPtr
-	sem <- struct{}{} // acquire a slot (blocks at capacity)
-	s.inFlight.Add(1)
 
-	go func() {
-		defer func() {
-			<-sem
-			s.inFlight.Add(-1)
+	var timeout <-chan time.Time
+	if d := s.Timeout(); d > 0 {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		timeout = timer.C
+	}
+
+	select {
+	case sem <- struct{}{}: // acquired a slot
+		s.inFlight.Add(1)
+
+		go func() {
+			defer func() {
+				<-sem
+				s.inFlight.Add(-1)
+			}()
+
+			_ = fn()
 		}()
-
-		_ = fn()
-	}()
+	case <-ctx.Done():
+		go func() {
+			_ = fn()
+		}()
+	case <-timeout:
+		go func() {
+			_ = fn()
+		}()
+	}
 
 	return nil, true
 }
