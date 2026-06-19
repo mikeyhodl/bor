@@ -531,6 +531,10 @@ func (h *Header) GetValidatorBytes(chainConfig *params.ChainConfig) []byte {
 		return nil
 	}
 
+	if !txDependencyValidPreValencia(chainConfig, h.Number, blockExtraData.TxDependency) {
+		return nil
+	}
+
 	return blockExtraData.ValidatorBytes
 }
 
@@ -549,6 +553,10 @@ func (h *Header) GetBaseFeeParams(chainConfig *params.ChainConfig) (gasTarget *u
 
 	var blockExtraData blockExtraDataRawTxDeps
 	if err := rlp.DecodeBytes(h.Extra[ExtraVanityLength:len(h.Extra)-ExtraSealLength], &blockExtraData); err != nil {
+		return nil, nil
+	}
+
+	if !txDependencyValidPreValencia(chainConfig, h.Number, blockExtraData.TxDependency) {
 		return nil, nil
 	}
 
@@ -574,7 +582,20 @@ func (h *Header) GetValidatorBytesAndBaseFeeParams(chainConfig *params.ChainConf
 		return nil, nil, nil
 	}
 
+	if !txDependencyValidPreValencia(chainConfig, h.Number, blockExtraData.TxDependency) {
+		return nil, nil, nil
+	}
+
 	return blockExtraData.ValidatorBytes, blockExtraData.GasTarget, blockExtraData.BaseFeeChangeDenominator
+}
+
+func txDependencyValidPreValencia(chainConfig *params.ChainConfig, number *big.Int, raw rlp.RawValue) bool {
+	if chainConfig.Bor != nil && chainConfig.Bor.IsValencia(number) {
+		return true
+	}
+
+	var txDep [][]uint64
+	return rlp.DecodeBytes(raw, &txDep) == nil
 }
 
 // DecodeBlockExtraData decodes the full BlockExtraData struct from the header's

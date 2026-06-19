@@ -159,3 +159,39 @@ func TestBorHeaderExtraAccessorsAgree(t *testing.T) {
 		t.Fatal("pre-Cancun validator bytes must be the raw envelope")
 	}
 }
+
+func TestTxDependencyValenciaGate(t *testing.T) {
+	const valencia = 100
+	cfg := &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(valencia)}}
+
+	validTxDep, err := rlp.EncodeToBytes([][]uint64{{0}, {0, 1}})
+	if err != nil {
+		t.Fatalf("encode valid txdep: %v", err)
+	}
+
+	malformed := map[string]rlp.RawValue{
+		"string":         {0x81, 0xff},
+		"list-of-int":    {0xc1, 0x01},
+		"inner overflow": {0xcb, 0xca, 0x89, 0x01, 0, 0, 0, 0, 0, 0, 0, 0},
+	}
+	for name, raw := range malformed {
+		if txDependencyValidPreValencia(cfg, big.NewInt(valencia-1), raw) {
+			t.Errorf("pre-Valencia must reject malformed TxDependency: %s", name)
+		}
+		for _, n := range []int64{valencia, valencia + 1} {
+			if !txDependencyValidPreValencia(cfg, big.NewInt(n), raw) {
+				t.Errorf("block %d must accept malformed TxDependency: %s", n, name)
+			}
+		}
+	}
+
+	for _, n := range []int64{valencia - 1, valencia, valencia + 1} {
+		if !txDependencyValidPreValencia(cfg, big.NewInt(n), validTxDep) {
+			t.Errorf("valid TxDependency must pass at %d", n)
+		}
+	}
+
+	if txDependencyValidPreValencia(&params.ChainConfig{Bor: &params.BorConfig{}}, big.NewInt(1_000_000), rlp.RawValue{0x81, 0xff}) {
+		t.Error("Valencia unset must keep malformed TxDependency rejected")
+	}
+}
