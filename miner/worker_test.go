@@ -3971,6 +3971,8 @@ func TestStateSyncReserveFor(t *testing.T) {
 		{"before valencia reserves nothing", &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(100)}}, 99, 0},
 		{"at valencia reserves budget", &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(100)}}, 100, params.MaxStateSyncBytesPerBlock},
 		{"after valencia reserves budget", &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(0)}}, 1, params.MaxStateSyncBytesPerBlock},
+		{"sprint start reserves budget", &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(0), Sprint: map[string]uint64{"0": 16}}}, 160, params.MaxStateSyncBytesPerBlock},
+		{"non sprint start reserves nothing", &params.ChainConfig{Bor: &params.BorConfig{ValenciaBlock: big.NewInt(0), Sprint: map[string]uint64{"0": 16}}}, 161, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

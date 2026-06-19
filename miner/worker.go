@@ -325,16 +325,25 @@ type task struct {
 }
 
 // stateSyncReserveFor returns the block-size budget to hold back for the state-sync
-// system tx appended in Finalize. From Valencia onward that tx is bounded to
-// params.MaxStateSyncBytesPerBlock, so the same amount is reserved while packing
-// normal txs to keep the assembled block within MaxBlockSize. Pre-Valencia (and
-// for non-Bor configs) nothing is reserved, preserving prior packing behavior.
+// system tx that CommitStates appends at sprint start (Valencia+). Only sprint-start
+// blocks carry that tx, so only they reserve; pre-Valencia and non-Bor configs
+// reserve nothing.
 func stateSyncReserveFor(config *params.ChainConfig, number *big.Int) uint64 {
-	if config.Bor != nil && config.Bor.IsValencia(number) {
-		return params.MaxStateSyncBytesPerBlock
+	if config.Bor == nil || !config.Bor.IsValencia(number) {
+		return 0
 	}
 
-	return 0
+	// Reserve only at sprint start. Fall back to reserving when the sprint length
+	// is unknown, which avoids a divide-by-zero and never under-reserves.
+	sprint := uint64(0)
+	if len(config.Bor.Sprint) > 0 {
+		sprint = config.Bor.CalculateSprint(number.Uint64())
+	}
+	if sprint > 0 && !bor.IsSprintStart(number.Uint64(), sprint) {
+		return 0
+	}
+
+	return params.MaxStateSyncBytesPerBlock
 }
 
 // txFits reports whether the transaction fits into the block size limit.
