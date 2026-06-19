@@ -1865,14 +1865,21 @@ func (c *Bor) CommitStates(
 			break
 		}
 
-		// From Valencia onward, bound the cumulative state-sync data committed per
-		// block. Overflow records stay pending and are picked up at later sprint
-		// starts, since lastStateID only advances for records actually included.
+		// From Valencia on, cap the state-sync bytes committed per block; records over
+		// the budget wait for a later sprint (lastStateID only advances for the ones we
+		// include). The first record always goes in, so a single over-budget record
+		// can't stall state sync forever.
 		recordSize := uint64(len(eventRecord.Data))
-		if stateSyncBudgetExceeded(enforceStateSyncBudget, stateSyncBytes, recordSize) {
+		if len(stateSyncs) > 0 && stateSyncBudgetExceeded(enforceStateSyncBudget, stateSyncBytes, recordSize) {
 			log.Info("state-sync byte budget reached, deferring remaining records", "number", number, "includedBytes", stateSyncBytes, "deferredFromID", eventRecord.ID)
 			break
 		}
+
+		// A record over Heimdall's per-record cap shouldn't happen; log it if one does.
+		if enforceStateSyncBudget && recordSize > params.MaxStateSyncRecordBytes {
+			log.Error("state-sync record exceeds expected per-record cap", "number", number, "id", eventRecord.ID, "size", recordSize, "cap", params.MaxStateSyncRecordBytes)
+		}
+
 		stateSyncBytes += recordSize
 
 		stateData := types.StateSyncData{

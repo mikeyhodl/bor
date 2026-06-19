@@ -3765,6 +3765,107 @@ func TestCommitStates_ValenciaBudget(t *testing.T) {
 	})
 }
 
+func runValenciaCommitWith(t *testing.T, lastStateID uint64, events []*clerk.EventRecordWithTime) []*types.StateSyncData {
+	t.Helper()
+	addr1 := common.HexToAddress("0x1")
+	sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
+	borCfg := &params.BorConfig{
+		Sprint:                     map[string]uint64{"0": 16},
+		Period:                     map[string]uint64{"0": 2},
+		IndoreBlock:                big.NewInt(0),
+		StateSyncConfirmationDelay: map[string]uint64{"0": 0},
+		RioBlock:                   big.NewInt(1000000),
+		ValenciaBlock:              big.NewInt(0),
+	}
+	chain, b := newChainAndBorForTest(t, sp, borCfg, true, addr1, uint64(time.Now().Unix())-200)
+	b.GenesisContractsClient = &mockGenesisContractForCommitStatesIndore{lastStateID: lastStateID, gasUsed: 100}
+	b.SetHeimdallClient(&mockHeimdallClient{events: events})
+
+	genesis := chain.HeaderChain().GetHeaderByNumber(0)
+	statedb := newStateDBForTest(t, genesis.Root)
+	h := &types.Header{
+		Number:     big.NewInt(16),
+		ParentHash: genesis.Hash(),
+		Time:       uint64(time.Now().Unix()),
+	}
+
+	result, err := b.CommitStates(statedb, h, statefull.ChainContext{Chain: chain.HeaderChain(), Bor: b})
+	require.NoError(t, err)
+	return result
+}
+
+// A record bigger than the whole budget must still be committed, never deferred forever.
+func TestCommitStates_ValenciaProgressGuarantee(t *testing.T) {
+	t.Parallel()
+
+	eventTime := time.Now().Add(-60 * time.Second)
+	oversized := &clerk.EventRecordWithTime{
+		EventRecord: clerk.EventRecord{
+			ID:       1,
+			Contract: common.HexToAddress("0x1001"),
+			Data:     make([]byte, params.MaxStateSyncBytesPerBlock+1),
+			ChainID:  "1",
+		},
+		Time: eventTime,
+	}
+
+	t.Run("oversized lone record is committed, not wedged", func(t *testing.T) {
+		t.Parallel()
+		result := runValenciaCommitWith(t, 0, []*clerk.EventRecordWithTime{oversized})
+		require.Len(t, result, 1)
+		require.Equal(t, uint64(1), result[0].ID)
+	})
+
+	t.Run("oversized first record commits alone, remainder deferred", func(t *testing.T) {
+		t.Parallel()
+		normal := &clerk.EventRecordWithTime{
+			EventRecord: clerk.EventRecord{
+				ID:       2,
+				Contract: common.HexToAddress("0x1001"),
+				Data:     make([]byte, 30_000),
+				ChainID:  "1",
+			},
+			Time: eventTime,
+		}
+		result := runValenciaCommitWith(t, 0, []*clerk.EventRecordWithTime{oversized, normal})
+		require.Len(t, result, 1)
+		require.Equal(t, uint64(1), result[0].ID)
+	})
+}
+
+// A backlog too big for one block should fully drain over the following blocks.
+func TestCommitStates_ValenciaBacklogDrains(t *testing.T) {
+	t.Parallel()
+
+	const recordSize = 30_000
+	fitting := params.MaxStateSyncBytesPerBlock / recordSize
+	total := fitting + 6
+
+	eventTime := time.Now().Add(-60 * time.Second)
+	events := make([]*clerk.EventRecordWithTime, 0, total)
+	for i := 1; i <= total; i++ {
+		events = append(events, &clerk.EventRecordWithTime{
+			EventRecord: clerk.EventRecord{
+				ID:       uint64(i),
+				Contract: common.HexToAddress("0x1001"),
+				Data:     make([]byte, recordSize),
+				ChainID:  "1",
+			},
+			Time: eventTime,
+		})
+	}
+
+	first := runValenciaCommitWith(t, 0, events)
+	require.Len(t, first, fitting)
+	require.Equal(t, uint64(1), first[0].ID)
+	require.Equal(t, uint64(fitting), first[len(first)-1].ID)
+
+	second := runValenciaCommitWith(t, uint64(fitting), events)
+	require.Len(t, second, total-fitting)
+	require.Equal(t, uint64(fitting+1), second[0].ID)
+	require.Equal(t, uint64(total), second[len(second)-1].ID)
+}
+
 // StateSyncEvents error path removed - waitUntilHeimdallIsSynced blocks
 // when FetchStatus fails, making the test hang indefinitely.
 func TestEncodeSigHeader_WithLondonBaseFee(t *testing.T) {

@@ -232,6 +232,13 @@ const (
 	// normal block sizes yet well within MaxBlockSize.
 	MaxStateSyncBytesPerBlock = 1 << 20 // 1 MiB
 
+	// MaxStateSyncRecordBytes mirrors Heimdall's per-record cap (helper.MaxStateSyncSize).
+	// The per-block budget above must stay larger so at least one record always fits.
+	MaxStateSyncRecordBytes = 30_000
+
+	// Build fails if the budget ever drops below the per-record cap (uint underflow).
+	_ = uint(MaxStateSyncBytesPerBlock - MaxStateSyncRecordBytes - 1)
+
 	// BorDefaultMinerGasPrice defines the minimum gas price to mine a transaction.
 	BorDefaultMinerGasPrice = 25 * GWei
 
