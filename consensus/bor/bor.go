@@ -1848,6 +1848,9 @@ func (c *Bor) CommitStates(
 	chainID := c.chainConfig.ChainID.String()
 	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
 
+	enforceStateSyncBudget := c.config.IsValencia(header.Number)
+	var stateSyncBytes uint64
+
 	var gasUsed uint64
 
 	for _, eventRecord := range eventRecords {
@@ -1859,6 +1862,16 @@ func (c *Bor) CommitStates(
 			log.Error("while validating event record", "block", number, "to", to, "stateID", lastStateID+1, "error", err.Error())
 			break
 		}
+
+		// From Valencia onward, bound the cumulative state-sync data committed per
+		// block. Overflow records stay pending and are picked up at later sprint
+		// starts, since lastStateID only advances for records actually included.
+		recordSize := uint64(len(eventRecord.Data))
+		if stateSyncBudgetExceeded(enforceStateSyncBudget, stateSyncBytes, recordSize) {
+			log.Info("state-sync byte budget reached, deferring remaining records", "number", number, "includedBytes", stateSyncBytes, "deferredFromID", eventRecord.ID)
+			break
+		}
+		stateSyncBytes += recordSize
 
 		stateData := types.StateSyncData{
 			ID:       eventRecord.ID,
@@ -1896,6 +1909,18 @@ func validateEventRecord(eventRecord *clerk.EventRecordWithTime, number uint64, 
 	}
 
 	return nil
+}
+
+// stateSyncBudgetExceeded reports whether committing a record of recordSize bytes
+// on top of includedBytes already committed would push the block's state-sync data
+// past params.MaxStateSyncBytesPerBlock. When enforce is false (pre-Valencia) the
+// batch stays unbounded, preserving the historical state transition.
+func stateSyncBudgetExceeded(enforce bool, includedBytes, recordSize uint64) bool {
+	if !enforce {
+		return false
+	}
+
+	return includedBytes+recordSize > params.MaxStateSyncBytesPerBlock
 }
 
 func (c *Bor) SetHeimdallClient(h IHeimdallClient) {

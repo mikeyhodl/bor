@@ -237,13 +237,14 @@ func newRegisteredCustomTimer(name string, reservoirSize int) *metrics.Timer {
 // environment is the worker's current environment and holds all
 // information of the sealing block generation.
 type environment struct {
-	signer   types.Signer
-	state    *state.StateDB // apply state changes here
-	tcount   int            // tx count in cycle
-	size     uint64         // size of the block we are building
-	gasPool  *core.GasPool  // available gas used to pack transactions
-	coinbase common.Address
-	evm      *vm.EVM
+	signer           types.Signer
+	state            *state.StateDB // apply state changes here
+	tcount           int            // tx count in cycle
+	size             uint64         // size of the block we are building
+	stateSyncReserve uint64         // block-size budget reserved for the state-sync system tx appended in Finalize (Valencia+)
+	gasPool          *core.GasPool  // available gas used to pack transactions
+	coinbase         common.Address
+	evm              *vm.EVM
 
 	header   *types.Header
 	txs      []*types.Transaction
@@ -276,6 +277,7 @@ func (env *environment) copy() *environment {
 		signer:             env.signer,
 		state:              env.state.Copy(),
 		tcount:             env.tcount,
+		stateSyncReserve:   env.stateSyncReserve,
 		coinbase:           env.coinbase,
 		header:             types.CopyHeader(env.header),
 		receipts:           copyReceipts(env.receipts),
@@ -322,9 +324,22 @@ type task struct {
 	intermediateRootTime time.Duration // time spent in IntermediateRoot inside FinalizeAndAssemble; subtracted when computing workerBlockExecutionTimer
 }
 
+// stateSyncReserveFor returns the block-size budget to hold back for the state-sync
+// system tx appended in Finalize. From Valencia onward that tx is bounded to
+// params.MaxStateSyncBytesPerBlock, so the same amount is reserved while packing
+// normal txs to keep the assembled block within MaxBlockSize. Pre-Valencia (and
+// for non-Bor configs) nothing is reserved, preserving prior packing behavior.
+func stateSyncReserveFor(config *params.ChainConfig, number *big.Int) uint64 {
+	if config.Bor != nil && config.Bor.IsValencia(number) {
+		return params.MaxStateSyncBytesPerBlock
+	}
+
+	return 0
+}
+
 // txFits reports whether the transaction fits into the block size limit.
 func (env *environment) txFitsSize(tx *types.Transaction) bool {
-	return env.size+tx.Size() < params.MaxBlockSize-maxBlockSizeBufferZone
+	return env.size+tx.Size() < params.MaxBlockSize-maxBlockSizeBufferZone-env.stateSyncReserve
 }
 
 const (
@@ -1289,6 +1304,7 @@ func (w *worker) makeEnv(header *types.Header, coinbase common.Address, witness 
 		prefetchedTxHashes: genParams.prefetchedTxHashes,
 	}
 	env.evm.SetInterrupt(&w.interruptBlockBuilding)
+	env.stateSyncReserve = stateSyncReserveFor(w.chainConfig, header.Number)
 
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0

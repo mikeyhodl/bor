@@ -223,6 +223,15 @@ const (
 
 	MaxBlockSize = 8_388_608 // maximum size of an RLP-encoded block
 
+	// MaxStateSyncBytesPerBlock caps the cumulative state-sync record data committed
+	// in a single Bor block from the Valencia fork onward. Heimdall serves state-sync
+	// records in an unbounded batch; without a cap a large backlog of individually
+	// valid records produces a block that exceeds MaxBlockSize and the p2p message
+	// limit, so it cannot propagate. Overflow records are deferred to later
+	// sprint-start blocks. 1 MiB is ~34 max-size (30 KB) records, far above observed
+	// normal block sizes yet well within MaxBlockSize.
+	MaxStateSyncBytesPerBlock = 1 << 20 // 1 MiB
+
 	// BorDefaultMinerGasPrice defines the minimum gas price to mine a transaction.
 	BorDefaultMinerGasPrice = 25 * GWei
 
