@@ -26,7 +26,7 @@ type SafePool struct {
 	closeOnce sync.Once
 
 	// Skip sending task to execution pool
-	fastPath bool
+	fastPath atomic.Bool
 }
 
 func NewExecutionPool(initialSize int, timeout time.Duration, service string, report bool) *SafePool {
@@ -38,7 +38,7 @@ func NewExecutionPool(initialSize int, timeout time.Duration, service string, re
 	}
 
 	if initialSize == 0 {
-		sp.fastPath = true
+		sp.fastPath.Store(true)
 
 		return sp
 	}
@@ -53,7 +53,7 @@ func NewExecutionPool(initialSize int, timeout time.Duration, service string, re
 }
 
 func (s *SafePool) Submit(ctx context.Context, fn func() error) (<-chan error, bool) {
-	if s.fastPath {
+	if s.fastPath.Load() {
 		go func() {
 			_ = fn()
 		}()
@@ -70,7 +70,20 @@ func (s *SafePool) Submit(ctx context.Context, fn func() error) (<-chan error, b
 }
 
 func (s *SafePool) ChangeSize(n int) {
+	if n <= 0 {
+		// No worker pool at size 0; use the fast path.
+		s.fastPath.Store(true)
+
+		s.Lock()
+		s.size = 0
+		s.Unlock()
+
+		return
+	}
+
 	oldPool := s.executionPool.Swap(workerpool.New(n))
+
+	s.fastPath.Store(false)
 
 	if oldPool != nil {
 		go func() {
