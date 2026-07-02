@@ -477,11 +477,14 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return err
 	}
 
-	// check extr adata
+	// Check extra data.
 	isSprintEnd := IsSprintStart(number+1, c.config.CalculateSprint(number))
 
-	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
-	signersBytes := len(header.GetValidatorBytes(c.chainConfig))
+	// Decode validator bytes and base-fee params.
+	validatorBytes, gasTarget, bfcd := header.GetValidatorBytesAndBaseFeeParams(c.chainConfig)
+
+	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise.
+	signersBytes := len(validatorBytes)
 
 	if !isSprintEnd && signersBytes != 0 {
 		return errExtraValidators
@@ -498,7 +501,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	// different configurations to reject each other's blocks. The actual base fee
 	// calculation in CalcBaseFee uses its own computation and does not read these fields.
 	if c.config.IsGiugliano(header.Number) {
-		gasTarget, bfcd := header.GetBaseFeeParams(c.chainConfig)
 		if gasTarget == nil || bfcd == nil {
 			return errMissingGiuglianoFields
 		}
