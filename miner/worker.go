@@ -754,12 +754,18 @@ const (
 // alone, so case (b) never recovered without a process restart.
 //
 // These two cases are distinguished ONLY by how long the build has been
-// outstanding (pendingWorkAgeSec = time since the build was submitted), NOT by
-// block-timestamp age (chainAgeSec is meaningless when the head carries an old
+// outstanding (pendingWorkAge = time since the build was submitted), NOT by
+// block-timestamp age (chainAge is meaningless when the head carries an old
 // timestamp, e.g. at genesis). We recover only once the outstanding build clearly
-// exceeds a normal build duration (stallThresholdSec), so a slow-but-live build is
+// exceeds a normal build duration (stallThreshold), so a slow-but-live build is
 // never interrupted.
-func decideVeblopFallback(pendingWorkBlock, nextBlock uint64, hasPendingTasks bool, chainAgeSec, veblopTimeoutSec, pendingWorkAgeSec, stallThresholdSec int64) veblopFallbackDecision {
+//
+// All durations are compared at their native resolution: pendingWorkAge is real
+// elapsed wall-clock (sub-second precise), so the threshold stays accurate at the
+// sub-second block times mainnet runs (miner block time is 1.5s). chainAge is the
+// exception — it derives from integer block timestamps, so it is inherently
+// second-granular regardless of representation.
+func decideVeblopFallback(pendingWorkBlock, nextBlock uint64, hasPendingTasks bool, chainAge, veblopTimeout, pendingWorkAge, stallThreshold time.Duration) veblopFallbackDecision {
 	// A sealing task is in flight; never interrupt it.
 	if hasPendingTasks {
 		return veblopSkip
@@ -767,13 +773,13 @@ func decideVeblopFallback(pendingWorkBlock, nextBlock uint64, hasPendingTasks bo
 	if pendingWorkBlock == nextBlock {
 		// Build outstanding for the next block. Recover only if it has been
 		// outstanding long enough to be considered wedged rather than in-progress.
-		if pendingWorkAgeSec >= stallThresholdSec {
+		if pendingWorkAge >= stallThreshold {
 			return veblopRecommit
 		}
 		return veblopWait
 	}
 	// Nothing is claimed for the next block — resubmit once the chain is stale.
-	if chainAgeSec >= veblopTimeoutSec {
+	if chainAge >= veblopTimeout {
 		return veblopRecommit
 	}
 	return veblopWait
@@ -905,28 +911,33 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			chainAgeSec := time.Now().Unix() - int64(currentBlock.Time)
 			lastStallWarnAt = w.warnIfStalled(currentBlock, chainAgeSec, veblopTimeout, pendingWorkBlock, pendingTasksCount, lastStallWarnAt)
 
-			veblopTimeoutSec := int64(veblopTimeout.Seconds())
-			if veblopTimeoutSec < 1 {
-				veblopTimeoutSec = 1
+			// veblopTimeout is already floored to the miner block time by commit();
+			// guard only the degenerate non-positive case so the threshold can't
+			// collapse to zero and interrupt builds instantly. Do NOT round up to a
+			// whole second — that would break sub-second block times.
+			effTimeout := veblopTimeout
+			if effTimeout <= 0 {
+				effTimeout = time.Second
 			}
 			// A build is treated as wedged only after it has been outstanding for
-			// noticeably longer than a normal build (matches warnIfStalled's
-			// 3x-timeout stale threshold), so a slow-but-live build is never
-			// interrupted. Measured from submit time, not block-timestamp age.
-			stallThresholdSec := 3 * veblopTimeoutSec
-			pendingWorkAgeSec := int64(0)
+			// noticeably longer than a normal build (~3x the block period, the same
+			// staleness multiple warnIfStalled uses), so a slow-but-live build is
+			// never interrupted. Measured from submit time, not block-timestamp age,
+			// at full sub-second resolution.
+			stallThreshold := 3 * effTimeout
+			var pendingWorkAge time.Duration
 			if !pendingWorkSubmittedAt.IsZero() {
-				pendingWorkAgeSec = int64(time.Since(pendingWorkSubmittedAt).Seconds())
+				pendingWorkAge = time.Since(pendingWorkSubmittedAt)
 			}
 
 			switch decideVeblopFallback(
 				pendingWorkBlock,
 				currentBlock.Number.Uint64()+1,
 				hasPendingTasks,
-				chainAgeSec,
-				veblopTimeoutSec,
-				pendingWorkAgeSec,
-				stallThresholdSec,
+				time.Duration(chainAgeSec)*time.Second,
+				effTimeout,
+				pendingWorkAge,
+				stallThreshold,
 			) {
 			case veblopRecommit:
 				// No sealing task is in flight and the producer is not making
@@ -3111,7 +3122,11 @@ func (w *worker) clearPending(number uint64) {
 // be captured under pendingMu by the caller — reading it here unguarded
 // would race with taskLoop / resultLoop.
 func (w *worker) warnIfStalled(currentBlock *types.Header, chainAgeSec int64, veblopTimeout time.Duration, pendingWorkBlock uint64, pendingTasksCount int, lastWarnAt time.Time) time.Time {
-	if chainAgeSec <= 3*int64(veblopTimeout.Seconds()) {
+	// Compare in time.Duration so the 3x staleness threshold honors sub-second
+	// block times (mainnet runs a 1.5s block time) — the same 3x multiple the
+	// recovery path in decideVeblopFallback uses. chainAge itself is inherently
+	// second-granular (it derives from integer block timestamps).
+	if time.Duration(chainAgeSec)*time.Second <= 3*veblopTimeout {
 		return lastWarnAt
 	}
 	if pendingWorkBlock != currentBlock.Number.Uint64()+1 && pendingTasksCount == 0 {
@@ -3123,7 +3138,7 @@ func (w *worker) warnIfStalled(currentBlock *types.Header, chainAgeSec int64, ve
 	log.Warn("Possible producer stall: veblop fallback skipping while chain is stale",
 		"currentBlock", currentBlock.Number.Uint64(),
 		"chainAgeSec", chainAgeSec,
-		"veblopTimeoutSec", int64(veblopTimeout.Seconds()),
+		"veblopTimeout", veblopTimeout,
 		"pendingWorkBlock", pendingWorkBlock,
 		"pendingTasksCount", pendingTasksCount,
 		"peerCount", w.eth.PeerCount())
