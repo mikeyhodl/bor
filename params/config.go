@@ -962,6 +962,7 @@ type BorConfig struct {
 	GiuglianoBlock             *big.Int          `json:"giuglianoBlock"`             // Giugliano switch block (nil = no fork, 0 = already on giugliano)
 	ChicagoBlock               *big.Int          `json:"chicagoBlock"`               // Chicago switch block (nil = no fork, 0 = already on chicago)
 	ValenciaBlock              *big.Int          `json:"valenciaBlock"`              // Valencia switch block (nil = no fork, 0 = already on valencia)
+	StateSyncGasBoundBlock     *big.Int          `json:"stateSyncGasBoundBlock"`     // State-sync gas bound switch block (nil = no fork, 0 = already active)
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -1043,6 +1044,11 @@ func (c *BorConfig) IsChicago(number *big.Int) bool {
 
 func (c *BorConfig) IsValencia(number *big.Int) bool {
 	return isBlockForked(c.ValenciaBlock, number)
+}
+
+// IsStateSyncGasBound reports whether state-sync gas accounting is active at number.
+func (c *BorConfig) IsStateSyncGasBound(number *big.Int) bool {
+	return isBlockForked(c.StateSyncGasBoundBlock, number)
 }
 
 // GetTargetGasPercentage returns the target gas percentage for gas limit calculation.
@@ -1254,10 +1260,13 @@ func (c *ChainConfig) Description() string {
 			banner += fmt.Sprintf(" - Giugliano:                   #%-8v\n", c.Bor.GiuglianoBlock)
 		}
 		if c.Bor.ChicagoBlock != nil {
-			banner += fmt.Sprintf(" - Chicago:                   #%-8v\n", c.Bor.ChicagoBlock)
+			banner += fmt.Sprintf(" - Chicago:                     #%-8v\n", c.Bor.ChicagoBlock)
 		}
 		if c.Bor.ValenciaBlock != nil {
-			banner += fmt.Sprintf(" - Valencia:                  #%-8v\n", c.Bor.ValenciaBlock)
+			banner += fmt.Sprintf(" - Valencia:                    #%-8v\n", c.Bor.ValenciaBlock)
+		}
+		if c.Bor.StateSyncGasBoundBlock != nil {
+			banner += fmt.Sprintf(" - StateSyncGasBound:           #%-8v\n", c.Bor.StateSyncGasBoundBlock)
 		}
 		return banner
 	}

@@ -1846,11 +1846,14 @@ func (c *Bor) CommitStates(
 
 	fetchTime := time.Since(fetchStart)
 	processStart := time.Now()
-	totalGas := 0 /// limit on gas for state sync per block
+
+	var totalGas uint64
 	chainID := c.chainConfig.ChainID.String()
 	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
 
 	enforceStateSyncBudget := c.config.IsValencia(header.Number)
+	enforceStateSyncGasBudget := c.config.IsStateSyncGasBound(header.Number)
+	stateReceiver := common.HexToAddress(c.config.StateReceiverContract)
 	var stateSyncBytes uint64
 
 	var gasUsed uint64
@@ -1875,6 +1878,12 @@ func (c *Bor) CommitStates(
 			break
 		}
 
+		// totalGas starts at zero, so the first pending record is always admitted.
+		if enforceStateSyncGasBudget && totalGas >= params.MaxStateSyncGasPerBlock {
+			log.Info("state-sync gas budget reached, deferring remaining records", "number", number, "includedGas", totalGas, "deferredFromID", eventRecord.ID)
+			break
+		}
+
 		// A record over Heimdall's per-record cap shouldn't happen; log it if one does.
 		if enforceStateSyncBudget && recordSize > params.MaxStateSyncRecordBytes {
 			log.Error("state-sync record exceeds expected per-record cap", "number", number, "id", eventRecord.ID, "size", recordSize, "cap", params.MaxStateSyncRecordBytes)
@@ -1890,16 +1899,16 @@ func (c *Bor) CommitStates(
 		}
 
 		stateSyncs = append(stateSyncs, &stateData)
+		statefull.PrepareStateSyncContext(state, c.chainConfig, header.Number, header.Time, header.Coinbase, stateReceiver)
 
-		// we expect that this call MUST emit an event, otherwise we wouldn't make a receipt
-		// if the receiver address is not a contract then we'll skip the most of the execution and emitting an event as well
-		// https://github.com/0xPolygon/genesis-contracts/blob/master/contracts/StateReceiver.sol#L27
+		// Receipt construction expects the receiver call to emit at least one log.
+		// A receiver without code can complete without producing one.
 		gasUsed, err = c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, c.vmConfig)
 		if err != nil {
 			return nil, err
 		}
 
-		totalGas += int(gasUsed)
+		totalGas += gasUsed
 
 		lastStateID++
 	}
