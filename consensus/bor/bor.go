@@ -1009,16 +1009,17 @@ func IsBlockEarly(parent *types.Header, header *types.Header, number uint64, suc
 	return parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, cfg)
 }
 
-// setGiuglianoExtraFields populates the GasTarget and BaseFeeChangeDenominator
-// fields in BlockExtraData for post-Giugliano blocks. CalcGasTarget and
-// BaseFeeChangeDenominator both operate on the parent header's values.
-func (c *Bor) setGiuglianoExtraFields(header *types.Header, parent *types.Header, blockExtraData *types.BlockExtraData) {
-	if c.config.IsGiugliano(header.Number) {
-		gasTarget := eip1559.CalcGasTarget(c.chainConfig, parent)
-		bfcd := params.BaseFeeChangeDenominator(c.config, parent.Number)
-		blockExtraData.GasTarget = &gasTarget
-		blockExtraData.BaseFeeChangeDenominator = &bfcd
+// giuglianoExtraFields returns the post-Giugliano EIP-1559 gas target and
+// base fee change denominator computed from parent, or (nil, nil) pre-Giugliano.
+func (c *Bor) giuglianoExtraFields(header *types.Header, parent *types.Header) (gasTarget *uint64, baseFeeChangeDenom *uint64) {
+	if !c.config.IsGiugliano(header.Number) {
+		return nil, nil
 	}
+
+	gt := eip1559.CalcGasTarget(c.chainConfig, parent)
+	bfcd := params.BaseFeeChangeDenominator(c.config, parent.Number)
+
+	return &gt, &bfcd
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -1070,14 +1071,9 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, w
 				tempValidatorBytes = append(tempValidatorBytes, validator.HeaderBytes()...)
 			}
 
-			blockExtraData := &types.BlockExtraData{
-				ValidatorBytes: tempValidatorBytes,
-				TxDependency:   nil,
-			}
+			gasTarget, baseFeeChangeDenom := c.giuglianoExtraFields(header, parent)
 
-			c.setGiuglianoExtraFields(header, parent, blockExtraData)
-
-			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
+			blockExtraDataBytes, err := types.EncodeBlockExtraData(c.chainConfig, header.Number, tempValidatorBytes, gasTarget, baseFeeChangeDenom)
 			if err != nil {
 				log.Error("error while encoding block extra data", "err", err)
 				return fmt.Errorf("error while encoding block extra data: %v", err)
@@ -1090,14 +1086,9 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, w
 			}
 		}
 	} else if c.chainConfig.IsCancun(header.Number) {
-		blockExtraData := &types.BlockExtraData{
-			ValidatorBytes: nil,
-			TxDependency:   nil,
-		}
+		gasTarget, baseFeeChangeDenom := c.giuglianoExtraFields(header, parent)
 
-		c.setGiuglianoExtraFields(header, parent, blockExtraData)
-
-		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
+		blockExtraDataBytes, err := types.EncodeBlockExtraData(c.chainConfig, header.Number, nil, gasTarget, baseFeeChangeDenom)
 		if err != nil {
 			log.Error("error while encoding block extra data", "err", err)
 			return fmt.Errorf("error while encoding block extra data: %v", err)
