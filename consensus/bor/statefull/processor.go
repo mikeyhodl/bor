@@ -160,9 +160,9 @@ func ApplyBorMessage(vmenv *vm.EVM, msg Callmsg) (*core.ExecutionResult, error) 
 	}, nil
 }
 
-// PrepareStateSyncContext resets transaction-scoped state before each post-fork record.
+// PrepareStateSyncContext resets transaction-scoped state before each post-Austin record.
 func PrepareStateSyncContext(state vm.StateDB, chainConfig *params.ChainConfig, blockNumber *big.Int, blockTime uint64, coinbase, stateReceiver common.Address) {
-	if chainConfig.Bor == nil || !chainConfig.Bor.IsStateSyncGasBound(blockNumber) {
+	if chainConfig.Bor == nil || !chainConfig.Bor.IsAustin(blockNumber) {
 		return
 	}
 	rules := chainConfig.Rules(blockNumber, false, blockTime)

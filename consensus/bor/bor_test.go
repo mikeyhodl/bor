@@ -4051,18 +4051,18 @@ func TestPrepare_CancunEncoding(t *testing.T) {
 	require.True(t, len(h2.Extra) > types.ExtraVanityLength+types.ExtraSealLength)
 }
 
-// TestPrepare_StateSyncGasBoundEncoding verifies Prepare encodes headers as
-// BlockExtraDataNoTxDep from the fork block onward, and as the legacy
+// TestPrepare_AustinEncoding verifies Prepare encodes headers as
+// BlockExtraDataNoTxDep from the Austin block onward, and as the legacy
 // BlockExtraData shape just before it.
-func TestPrepare_StateSyncGasBoundEncoding(t *testing.T) {
+func TestPrepare_AustinEncoding(t *testing.T) {
 	t.Parallel()
 	addr1 := common.HexToAddress("0x1")
 	sp := &fakeSpanner{vals: []*valset.Validator{{Address: addr1, VotingPower: 1}}}
 
-	const fork = 15 // coincide with the sprint-end block used below
+	const austin = 15 // coincide with the sprint-end block used below
 	borCfg := borConfigWithDelays(16)
 	borCfg.GiuglianoBlock = big.NewInt(0)
-	borCfg.StateSyncGasBoundBlock = big.NewInt(fork)
+	borCfg.AustinBlock = big.NewInt(austin)
 
 	cfg := newAllForksChainConfig(borCfg)
 	cfg.ShanghaiBlock = big.NewInt(0)
@@ -4071,10 +4071,10 @@ func TestPrepare_StateSyncGasBoundEncoding(t *testing.T) {
 	chain, b := newChainAndBorForTestWithConfig(t, sp, cfg, true, addr1, uint64(time.Now().Unix())-200)
 	genesis := chain.HeaderChain().GetHeaderByNumber(0)
 
-	// Block 15 is sprint-end (IsSprintStart(16, 16)=true) and == fork: post-fork wire shape.
+	// Block 15 is sprint-end (IsSprintStart(16, 16)=true) and == austin: post-Austin wire shape.
 	h := &types.Header{
 		ParentHash: genesis.Hash(),
-		Number:     big.NewInt(fork),
+		Number:     big.NewInt(austin),
 		GasLimit:   genesis.GasLimit,
 		UncleHash:  uncleHash,
 	}
@@ -4082,7 +4082,7 @@ func TestPrepare_StateSyncGasBoundEncoding(t *testing.T) {
 
 	payload := h.Extra[types.ExtraVanityLength : len(h.Extra)-types.ExtraSealLength]
 	var noDep types.BlockExtraDataNoTxDep
-	require.NoError(t, rlp.DecodeBytes(payload, &noDep), "post-fork Extra must decode as BlockExtraDataNoTxDep")
+	require.NoError(t, rlp.DecodeBytes(payload, &noDep), "post-Austin Extra must decode as BlockExtraDataNoTxDep")
 	require.NotEmpty(t, noDep.ValidatorBytes)
 	require.NotNil(t, noDep.GasTarget)
 
@@ -4092,7 +4092,7 @@ func TestPrepare_StateSyncGasBoundEncoding(t *testing.T) {
 	require.Equal(t, noDep.BaseFeeChangeDenominator, den)
 	full := h.DecodeBlockExtraData(cfg)
 	require.NotNil(t, full)
-	require.Nil(t, full.TxDependency, "TxDependency must normalize to nil post-fork")
+	require.Nil(t, full.TxDependency, "TxDependency must normalize to nil post-Austin")
 }
 func TestFinalize_SprintWithHeimdallCommitStates(t *testing.T) {
 	t.Parallel()

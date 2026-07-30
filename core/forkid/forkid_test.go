@@ -459,11 +459,11 @@ func TestGatherForksBor(t *testing.T) {
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
 		Bor: &params.BorConfig{
-			JaipurBlock:            big.NewInt(100),
-			DelhiBlock:             big.NewInt(200),
-			IndoreBlock:            big.NewInt(300),
-			AhmedabadBlock:         big.NewInt(400),
-			StateSyncGasBoundBlock: big.NewInt(500),
+			JaipurBlock:    big.NewInt(100),
+			DelhiBlock:     big.NewInt(200),
+			IndoreBlock:    big.NewInt(300),
+			AhmedabadBlock: big.NewInt(400),
+			AustinBlock:    big.NewInt(500),
 		},
 	}
 

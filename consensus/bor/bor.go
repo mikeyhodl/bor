@@ -1843,7 +1843,7 @@ func (c *Bor) CommitStates(
 	stateSyncs := make([]*types.StateSyncData, 0, len(eventRecords))
 
 	enforceStateSyncBudget := c.config.IsValencia(header.Number)
-	enforceStateSyncGasBudget := c.config.IsStateSyncGasBound(header.Number)
+	enforceStateSyncGasBudget := c.config.IsAustin(header.Number)
 	stateReceiver := common.HexToAddress(c.config.StateReceiverContract)
 	var stateSyncBytes uint64
 

@@ -238,8 +238,8 @@ func TestIsValencia(t *testing.T) {
 	}
 }
 
-// TestIsStateSyncGasBound covers nil, genesis, and scheduled activation boundaries.
-func TestIsStateSyncGasBound(t *testing.T) {
+// TestIsAustin covers nil, genesis, and scheduled activation boundaries.
+func TestIsAustin(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -260,8 +260,8 @@ func TestIsStateSyncGasBound(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := &BorConfig{StateSyncGasBoundBlock: tt.fork}
-			assert.Equal(t, c.IsStateSyncGasBound(big.NewInt(tt.number)), tt.want)
+			c := &BorConfig{AustinBlock: tt.fork}
+			assert.Equal(t, c.IsAustin(big.NewInt(tt.number)), tt.want)
 		})
 	}
 }

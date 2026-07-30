@@ -24,7 +24,7 @@ import (
 func gasBoundBorConfig(gasBoundBlock *big.Int) *params.BorConfig {
 	cfg := indoreBorConfig()
 	cfg.ValenciaBlock = big.NewInt(0)
-	cfg.StateSyncGasBoundBlock = gasBoundBlock
+	cfg.AustinBlock = gasBoundBlock
 	cfg.StateReceiverContract = "0x0000000000000000000000000000000000001001"
 	return cfg
 }

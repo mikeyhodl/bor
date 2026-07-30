@@ -166,43 +166,43 @@ func TestBorHeaderExtraAccessorsAgree(t *testing.T) {
 	}
 }
 
-// TestBorHeaderExtraStateSyncGasBoundBoundary checks the accessors at the
-// activation boundary (N-1/N/N+1): pre-fork blocks decode real TxDependency
-// via BlockExtraData; post-fork blocks decode via BlockExtraDataNoTxDep and
+// TestBorHeaderExtraAustinBoundary checks the accessors at the
+// activation boundary (N-1/N/N+1): pre-Austin blocks decode real TxDependency
+// via BlockExtraData; post-Austin blocks decode via BlockExtraDataNoTxDep and
 // every accessor returns nil TxDependency.
-func TestBorHeaderExtraStateSyncGasBoundBoundary(t *testing.T) {
+func TestBorHeaderExtraAustinBoundary(t *testing.T) {
 	t.Parallel()
 
-	const fork = 100
+	const austin = 100
 	cfg := &params.ChainConfig{
 		ChainID:     big.NewInt(137),
 		CancunBlock: big.NewInt(0),
 		Bor: &params.BorConfig{
-			ValenciaBlock:          big.NewInt(0),
-			StateSyncGasBoundBlock: big.NewInt(fork),
+			ValenciaBlock: big.NewInt(0),
+			AustinBlock:   big.NewInt(austin),
 		},
 	}
 	gasTarget, bfcd := uint64(30_000_000), uint64(8)
 
-	// N-1: pre-fork, TxDependency is still on the wire and must decode.
+	// N-1: pre-Austin, TxDependency is still on the wire and must decode.
 	preHeader := &Header{
-		Number: big.NewInt(fork - 1),
+		Number: big.NewInt(austin - 1),
 		Extra:  borExtraWithDeps(t, []byte("val set"), 3, &gasTarget, &bfcd),
 	}
 
 	vals, gt, den := preHeader.GetValidatorBytesAndBaseFeeParams(cfg)
 	if !bytes.Equal(vals, []byte("val set")) {
-		t.Fatalf("pre-fork validator bytes: got %q", vals)
+		t.Fatalf("pre-Austin validator bytes: got %q", vals)
 	}
 	if gt == nil || *gt != gasTarget || den == nil || *den != bfcd {
-		t.Fatalf("pre-fork base-fee params: got (%v,%v)", gt, den)
+		t.Fatalf("pre-Austin base-fee params: got (%v,%v)", gt, den)
 	}
 	if full := preHeader.DecodeBlockExtraData(cfg); full == nil || len(full.TxDependency) != 3 {
-		t.Fatalf("pre-fork DecodeBlockExtraData must still expose real TxDependency: %+v", full)
+		t.Fatalf("pre-Austin DecodeBlockExtraData must still expose real TxDependency: %+v", full)
 	}
 
-	// N and N+1: post-fork, no TxDependency slot on the wire at all.
-	for _, n := range []int64{fork, fork + 1} {
+	// N and N+1: post-Austin, no TxDependency slot on the wire at all.
+	for _, n := range []int64{austin, austin + 1} {
 		body, err := rlp.EncodeToBytes(&BlockExtraDataNoTxDep{
 			ValidatorBytes:           []byte("val set"),
 			GasTarget:                &gasTarget,
@@ -232,7 +232,7 @@ func TestBorHeaderExtraStateSyncGasBoundBoundary(t *testing.T) {
 			t.Fatalf("block %d: DecodeBlockExtraData returned nil", n)
 		}
 		if full.TxDependency != nil {
-			t.Fatalf("block %d: TxDependency must be nil post-StateSyncGasBound, got %v", n, full.TxDependency)
+			t.Fatalf("block %d: TxDependency must be nil post-Austin, got %v", n, full.TxDependency)
 		}
 		if !bytes.Equal(full.ValidatorBytes, []byte("val set")) || full.GasTarget == nil || *full.GasTarget != gasTarget {
 			t.Fatalf("block %d: DecodeBlockExtraData mismatch: %+v", n, full)

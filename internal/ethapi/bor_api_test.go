@@ -4182,13 +4182,13 @@ func postCancunCfg() *params.ChainConfig {
 	}
 }
 
-func postStateSyncGasBoundCfg() *params.ChainConfig {
+func postAustinCfg() *params.ChainConfig {
 	return &params.ChainConfig{
 		ChainID:     big.NewInt(1),
 		CancunBlock: big.NewInt(0),
 		Bor: &params.BorConfig{
-			GiuglianoBlock:         big.NewInt(0),
-			StateSyncGasBoundBlock: big.NewInt(0),
+			GiuglianoBlock: big.NewInt(0),
+			AustinBlock:    big.NewInt(0),
 		},
 	}
 }
@@ -4212,10 +4212,10 @@ func makeBlockWithBorExtra(number int64, bed any) *types.Block {
 	return makeBlockWithExtra(number, extra)
 }
 
-// TestGetBlockByNumber_BorExtraFlag_PostStateSyncGasBound verifies
-// decodedExtra.txDependency is always null once the fork activates, while
+// TestGetBlockByNumber_BorExtraFlag_PostAustin verifies
+// decodedExtra.txDependency is always null once Austin activates, while
 // gasTarget/baseFeeChangeDenominator still round-trip.
-func TestGetBlockByNumber_BorExtraFlag_PostStateSyncGasBound(t *testing.T) {
+func TestGetBlockByNumber_BorExtraFlag_PostAustin(t *testing.T) {
 	t.Parallel()
 	gasTarget := uint64(15_000_000)
 	bfcd := uint64(64)
@@ -4224,7 +4224,7 @@ func TestGetBlockByNumber_BorExtraFlag_PostStateSyncGasBound(t *testing.T) {
 		GasTarget:                &gasTarget,
 		BaseFeeChangeDenominator: &bfcd,
 	})
-	api := newBlockExtraTestAPI(t, block, postStateSyncGasBoundCfg())
+	api := newBlockExtraTestAPI(t, block, postAustinCfg())
 
 	result, err := api.GetBlockByNumber(context.Background(), 10, false, boolPtr(true))
 	require.NoError(t, err)
@@ -4238,7 +4238,7 @@ func TestGetBlockByNumber_BorExtraFlag_PostStateSyncGasBound(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(gasTarget), *rpcExtra.GasTarget)
 	require.NotNil(t, rpcExtra.BaseFeeChangeDenominator)
 	require.Equal(t, hexutil.Uint64(bfcd), *rpcExtra.BaseFeeChangeDenominator)
-	require.Nil(t, rpcExtra.TxDependency, "txDependency must be null post-StateSyncGasBound")
+	require.Nil(t, rpcExtra.TxDependency, "txDependency must be null post-Austin")
 }
 
 func TestGetBlockByNumber_BorExtraFlag_PostCancun(t *testing.T) {
