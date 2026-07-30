@@ -348,6 +348,7 @@ var (
 			GiuglianoBlock:    big.NewInt(35573500),
 			ChicagoBlock:      big.NewInt(38358000),
 			ValenciaBlock:     big.NewInt(40776000),
+			AustinBlock:       big.NewInt(44120000),
 			StateSyncConfirmationDelay: map[string]uint64{
 				"0": 128,
 			},
@@ -437,6 +438,7 @@ var (
 			GiuglianoBlock:    big.NewInt(85268500),
 			ChicagoBlock:      big.NewInt(87218600),
 			ValenciaBlock:     big.NewInt(89531000),
+			AustinBlock:       big.NewInt(91949700),
 			StateSyncConfirmationDelay: map[string]uint64{
 				"44934656": 128,
 			},
