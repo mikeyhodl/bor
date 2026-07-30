@@ -1608,7 +1608,6 @@ mainloop:
 			log.Debug("Transaction failed, account skipped", "hash", ltx.Hash, "err", err)
 			txs.Pop()
 		}
-
 	}
 
 	if !w.IsRunning() && len(coalescedLogs) > 0 {
