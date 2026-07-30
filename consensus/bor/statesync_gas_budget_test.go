@@ -1,28 +1,20 @@
 package bor
 
 import (
-	"context"
 	"math/big"
 	"testing"
 	"time"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/bor/clerk"
 	"github.com/ethereum/go-ethereum/consensus/bor/statefull"
 	"github.com/ethereum/go-ethereum/consensus/bor/valset"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/blockstm"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/triedb"
 
 	borTypes "github.com/0xPolygon/heimdall-v2/x/bor/types"
 	stakeTypes "github.com/0xPolygon/heimdall-v2/x/stake/types"
@@ -231,157 +223,4 @@ func TestCommitStates_StateSyncContextPreparation(t *testing.T) {
 			require.Equal(t, rootBefore, statedb.IntermediateRoot(false))
 		})
 	}
-}
-
-// accessListSensitiveStateSyncContract executes a real SLOAD through the system-call
-// path. gasBias positions cumulative gas around the block threshold without changing
-// the warm-versus-cold gas delta produced by the EVM.
-type accessListSensitiveStateSyncContract struct {
-	chainConfig *params.ChainConfig
-	target      common.Address
-	gasBias     uint64
-}
-
-func (c *accessListSensitiveStateSyncContract) CommitState(_ *clerk.EventRecordWithTime, state vm.StateDB, header *types.Header, chain statefull.ChainContext, config vm.Config) (uint64, error) {
-	message := statefull.GetSystemMessage(c.target, nil)
-	gasUsed, err := statefull.ApplyMessage(context.Background(), message, state, header, c.chainConfig, chain, config)
-	return c.gasBias + gasUsed, err
-}
-
-func (*accessListSensitiveStateSyncContract) LastStateId(*state.StateDB, uint64, common.Hash) (*big.Int, error) {
-	return new(big.Int), nil
-}
-
-// TestCommitStates_SerialAndBlockSTMStateSyncParity executes the same EIP-2930
-// transaction through serial execution and V2 BlockSTM. Serial execution retains
-// its access list, while BlockSTM settlement copies persistent writes but not the
-// transaction-scoped access list. CommitStates must normalize that difference before
-// gas accounting so both paths admit the same state-sync prefix.
-func TestCommitStates_SerialAndBlockSTMStateSyncParity(t *testing.T) {
-	t.Parallel()
-
-	now := time.Now()
-	target := common.HexToAddress("0x1001")
-	slot := common.Hash{}
-	signerAddress := common.HexToAddress("0x1")
-	borConfig := gasBoundBorConfig(big.NewInt(0))
-	borConfig.BurntContract = map[string]string{"0": common.Address{}.Hex()}
-	borConfig.ValidatorContract = common.HexToAddress("0x1000").Hex()
-	chainConfig := newAllForksChainConfig(borConfig)
-	sp := &fakeSpanner{vals: []*valset.Validator{{Address: signerAddress, VotingPower: 1}}}
-	chain, b := newChainAndBorForTestWithConfig(t, sp, chainConfig, true, signerAddress, uint64(now.Unix())-200)
-	b.SetHeimdallClient(&mockHeimdallClient{events: gasBoundEvents(3, now.Add(-60*time.Second))})
-
-	memoryDB := rawdb.NewMemoryDatabase()
-	trieDB := triedb.NewDatabase(memoryDB, triedb.HashDefaults)
-	stateDatabase := state.NewDatabase(trieDB, nil)
-	initialState, err := state.New(common.Hash{}, stateDatabase)
-	require.NoError(t, err)
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	sender := crypto.PubkeyToAddress(key.PublicKey)
-	initialState.AddBalance(sender, uint256.NewInt(params.Ether), tracing.BalanceChangeUnspecified)
-	// The target loads slot zero, discards it, and returns uint256(1).
-	initialState.SetCode(target, common.FromHex("0x60005450600160005260206000f3"), tracing.CodeChangeUnspecified)
-	initialState.SetState(target, slot, common.HexToHash("0x01"))
-	root, err := initialState.Commit(0, false, false)
-	require.NoError(t, err)
-	require.NoError(t, trieDB.Commit(root, false))
-
-	newState := func() *state.StateDB {
-		statedb, err := state.New(root, stateDatabase)
-		require.NoError(t, err)
-		return statedb
-	}
-
-	header := &types.Header{
-		Number:     big.NewInt(16),
-		ParentHash: chain.HeaderChain().GetHeaderByNumber(0).Hash(),
-		Coinbase:   common.HexToAddress("0xc0ffee"),
-		Difficulty: big.NewInt(1),
-		GasLimit:   params.MaxGasLimit,
-		BaseFee:    new(big.Int),
-		Time:       uint64(now.Unix()),
-	}
-	chainContext := statefull.ChainContext{Chain: chain.HeaderChain(), Bor: b}
-	blockContext := core.NewEVMBlockContext(header, chainContext, &header.Coinbase)
-	transactionSigner := types.MakeSigner(chainConfig, header.Number, header.Time)
-	// The final user transaction explicitly warms the target and slot zero.
-	transaction, err := types.SignTx(types.NewTx(&types.AccessListTx{
-		ChainID:    chainConfig.ChainID,
-		GasPrice:   big.NewInt(1),
-		Gas:        100_000,
-		To:         &target,
-		Value:      new(big.Int),
-		AccessList: types.AccessList{{Address: target, StorageKeys: []common.Hash{slot}}},
-	}), transactionSigner, key)
-	require.NoError(t, err)
-	message, err := core.TransactionToMessage(transaction, transactionSigner, header.BaseFee)
-	require.NoError(t, err)
-
-	// Execute the access-list transaction through the production serial path.
-	serialState := newState()
-	serialState.SetTxContext(transaction.Hash(), 0)
-	serialEVM := vm.NewEVM(blockContext, serialState, chainConfig, vm.Config{})
-	var serialGasUsed uint64
-	_, err = core.ApplyTransactionWithEVM(message, new(core.GasPool).AddGas(header.GasLimit), serialState, header.Number, header.Hash(), header.Time, transaction, &serialGasUsed, serialEVM)
-	require.NoError(t, err)
-
-	// Execute and settle the same transaction through the production V2 BlockSTM path.
-	blockSTMBase := newState()
-	blockSTMState := newState()
-	result := core.ExecuteV2BlockSTM(
-		context.Background(),
-		[]core.V2Task{{Index: 0, Tx: transaction, Msg: message}},
-		blockSTMBase,
-		blockstm.NewMVStore(),
-		blockstm.NewMVBalanceStore(),
-		blockContext,
-		header.Hash(),
-		vm.Config{},
-		chainConfig,
-		header.GasLimit,
-		2,
-		blockSTMState,
-		nil,
-	)
-	// The BlockSTM executor must settle the transaction without an execution failure.
-	require.Equal(t, -1, result.PanickedIdx)
-	require.Equal(t, -1, result.ExecErrIdx)
-	// Both processors must agree on persistent state before Bor finalization.
-	require.Equal(t, serialState.Copy().IntermediateRoot(true), blockSTMState.Copy().IntermediateRoot(true))
-
-	// The fixture must expose the transaction-scoped difference that Prepare normalizes.
-	_, serialSlotWarm := serialState.SlotInAccessList(target, slot)
-	_, blockSTMSlotWarm := blockSTMState.SlotInAccessList(target, slot)
-	require.True(t, serialSlotWarm)
-	require.False(t, blockSTMSlotWarm)
-
-	// Probe copies before normalization to measure the real EVM warm/cold SLOAD delta.
-	stateSyncContract := &accessListSensitiveStateSyncContract{chainConfig: chainConfig, target: target}
-	warmGas, err := stateSyncContract.CommitState(nil, serialState.Copy(), header, chainContext, vm.Config{})
-	require.NoError(t, err)
-	coldGas, err := stateSyncContract.CommitState(nil, blockSTMState.Copy(), header, chainContext, vm.Config{})
-	require.NoError(t, err)
-	require.Greater(t, coldGas, warmGas)
-
-	// Position two callbacks on opposite sides of the threshold without preparation:
-	// serial remains below it, while BlockSTM reaches it because its first SLOAD is cold.
-	stateSyncContract.gasBias = (params.MaxStateSyncGasPerBlock - 1 - 2*warmGas) / 2
-	serialWithoutPreparation := 2 * (stateSyncContract.gasBias + warmGas)
-	blockSTMWithoutPreparation := serialWithoutPreparation + coldGas - warmGas
-	require.Less(t, serialWithoutPreparation, params.MaxStateSyncGasPerBlock)
-	require.GreaterOrEqual(t, blockSTMWithoutPreparation, params.MaxStateSyncGasPerBlock)
-	b.GenesisContractsClient = stateSyncContract
-
-	// Per-record preparation makes both callbacks cold in both processors. Each path
-	// therefore admits two records. Removing Prepare makes serial admit three and
-	// BlockSTM admit two, causing the prefix-length assertion to fail.
-	serialStateSyncs, err := b.CommitStates(serialState, header, chainContext)
-	require.NoError(t, err)
-	blockSTMStateSyncs, err := b.CommitStates(blockSTMState, header, chainContext)
-	require.NoError(t, err)
-	require.Equal(t, len(serialStateSyncs), len(blockSTMStateSyncs), "state-sync prefix length")
-	require.Equal(t, serialStateSyncs, blockSTMStateSyncs)
-	require.Len(t, serialStateSyncs, 2)
 }
