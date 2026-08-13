@@ -4203,7 +4203,7 @@ func newBlockExtraTestAPI(t *testing.T, block *types.Block, cfg *params.ChainCon
 }
 
 // makeBlockWithBorExtra creates a block with an RLP-encoded BlockExtraData or
-// BlockExtraDataNoTxDep in the header Extra field.
+// BlockExtraDataPostAustin in the header Extra field.
 func makeBlockWithBorExtra(number int64, bed any) *types.Block {
 	bedBytes, _ := rlp.EncodeToBytes(bed)
 	extra := make([]byte, types.ExtraVanityLength)
@@ -4220,7 +4220,7 @@ func TestGetBlockByNumber_BorExtraFlag_PostAustin(t *testing.T) {
 	gasTarget := uint64(15_000_000)
 	bfcd := uint64(64)
 
-	block := makeBlockWithBorExtra(10, &types.BlockExtraDataNoTxDep{
+	block := makeBlockWithBorExtra(10, &types.BlockExtraDataPostAustin{
 		GasTarget:                &gasTarget,
 		BaseFeeChangeDenominator: &bfcd,
 	})

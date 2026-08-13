@@ -139,10 +139,10 @@ type BlockExtraData struct {
 	BaseFeeChangeDenominator *uint64 `rlp:"optional"`
 }
 
-// BlockExtraDataNoTxDep drops TxDependency, which sat before the optional
+// BlockExtraDataPostAustin drops TxDependency, which sat before the optional
 // GasTarget/BaseFeeChangeDenominator fields and so couldn't be removed via
 // rlp:"optional" (that only trims a trailing run).
-type BlockExtraDataNoTxDep struct {
+type BlockExtraDataPostAustin struct {
 	ValidatorBytes           []byte
 	GasTarget                *uint64 `rlp:"optional"`
 	BaseFeeChangeDenominator *uint64 `rlp:"optional"`
@@ -153,7 +153,7 @@ type BlockExtraDataNoTxDep struct {
 // ValidatorBytes and the base-fee params, so this avoids expanding a
 // potentially large TxDependency into [][]uint64. The wire format is identical to BlockExtraData.
 // Only used pre-Austin; post-Austin headers decode straight into
-// BlockExtraDataNoTxDep, which is already cheap.
+// BlockExtraDataPostAustin, which is already cheap.
 type blockExtraDataRawTxDeps struct {
 	ValidatorBytes           []byte
 	TxDependency             rlp.RawValue
@@ -166,7 +166,7 @@ type blockExtraDataRawTxDeps struct {
 // Callers elsewhere should use this rather than reimplementing the fork check.
 func EncodeBlockExtraData(chainConfig *params.ChainConfig, number *big.Int, validatorBytes []byte, gasTarget, baseFeeChangeDenom *uint64) ([]byte, error) {
 	if chainConfig.Bor != nil && chainConfig.Bor.IsAustin(number) {
-		return rlp.EncodeToBytes(&BlockExtraDataNoTxDep{
+		return rlp.EncodeToBytes(&BlockExtraDataPostAustin{
 			ValidatorBytes:           validatorBytes,
 			GasTarget:                gasTarget,
 			BaseFeeChangeDenominator: baseFeeChangeDenom,
@@ -536,7 +536,7 @@ func (h *Header) decodeExtraFieldsFast(chainConfig *params.ChainConfig) (validat
 	raw := h.Extra[ExtraVanityLength : len(h.Extra)-ExtraSealLength]
 
 	if chainConfig.Bor != nil && chainConfig.Bor.IsAustin(h.Number) {
-		var blockExtraData BlockExtraDataNoTxDep
+		var blockExtraData BlockExtraDataPostAustin
 		if err := rlp.DecodeBytes(raw, &blockExtraData); err != nil {
 			log.Debug("error while decoding block extra data", "err", err)
 			return nil, nil, nil, false

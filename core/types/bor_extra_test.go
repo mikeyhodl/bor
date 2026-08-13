@@ -28,7 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
-// wrapExtra wraps an RLP-encoded BlockExtraData/BlockExtraDataNoTxDep body in
+// wrapExtra wraps an RLP-encoded BlockExtraData/BlockExtraDataPostAustin body in
 // the vanity+seal envelope real header.Extra bytes use.
 func wrapExtra(body []byte) []byte {
 	extra := make([]byte, ExtraVanityLength, ExtraVanityLength+len(body)+ExtraSealLength)
@@ -168,7 +168,7 @@ func TestBorHeaderExtraAccessorsAgree(t *testing.T) {
 
 // TestBorHeaderExtraAustinBoundary checks the accessors at the
 // activation boundary (N-1/N/N+1): pre-Austin blocks decode real TxDependency
-// via BlockExtraData; post-Austin blocks decode via BlockExtraDataNoTxDep and
+// via BlockExtraData; post-Austin blocks decode via BlockExtraDataPostAustin and
 // every accessor returns nil TxDependency.
 func TestBorHeaderExtraAustinBoundary(t *testing.T) {
 	t.Parallel()
@@ -203,13 +203,13 @@ func TestBorHeaderExtraAustinBoundary(t *testing.T) {
 
 	// N and N+1: post-Austin, no TxDependency slot on the wire at all.
 	for _, n := range []int64{austin, austin + 1} {
-		body, err := rlp.EncodeToBytes(&BlockExtraDataNoTxDep{
+		body, err := rlp.EncodeToBytes(&BlockExtraDataPostAustin{
 			ValidatorBytes:           []byte("val set"),
 			GasTarget:                &gasTarget,
 			BaseFeeChangeDenominator: &bfcd,
 		})
 		if err != nil {
-			t.Fatalf("encode BlockExtraDataNoTxDep: %v", err)
+			t.Fatalf("encode BlockExtraDataPostAustin: %v", err)
 		}
 		postHeader := &Header{Number: big.NewInt(n), Extra: wrapExtra(body)}
 
@@ -238,17 +238,17 @@ func TestBorHeaderExtraAustinBoundary(t *testing.T) {
 			t.Fatalf("block %d: DecodeBlockExtraData mismatch: %+v", n, full)
 		}
 
-		// Round-trip: BlockExtraDataNoTxDep must encode/decode stably.
-		var decoded BlockExtraDataNoTxDep
+		// Round-trip: BlockExtraDataPostAustin must encode/decode stably.
+		var decoded BlockExtraDataPostAustin
 		if err := rlp.DecodeBytes(body, &decoded); err != nil {
-			t.Fatalf("block %d: BlockExtraDataNoTxDep decode: %v", n, err)
+			t.Fatalf("block %d: BlockExtraDataPostAustin decode: %v", n, err)
 		}
 		reencoded, err := rlp.EncodeToBytes(&decoded)
 		if err != nil {
-			t.Fatalf("block %d: BlockExtraDataNoTxDep re-encode: %v", n, err)
+			t.Fatalf("block %d: BlockExtraDataPostAustin re-encode: %v", n, err)
 		}
 		if !bytes.Equal(reencoded, body) {
-			t.Fatalf("block %d: BlockExtraDataNoTxDep round-trip mismatch", n)
+			t.Fatalf("block %d: BlockExtraDataPostAustin round-trip mismatch", n)
 		}
 	}
 }

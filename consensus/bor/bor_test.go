@@ -4052,7 +4052,7 @@ func TestPrepare_CancunEncoding(t *testing.T) {
 }
 
 // TestPrepare_AustinEncoding verifies Prepare encodes headers as
-// BlockExtraDataNoTxDep from the Austin block onward, and as the legacy
+// BlockExtraDataPostAustin from the Austin block onward, and as the legacy
 // BlockExtraData shape just before it.
 func TestPrepare_AustinEncoding(t *testing.T) {
 	t.Parallel()
@@ -4081,8 +4081,8 @@ func TestPrepare_AustinEncoding(t *testing.T) {
 	require.NoError(t, b.Prepare(chain.HeaderChain(), h, false))
 
 	payload := h.Extra[types.ExtraVanityLength : len(h.Extra)-types.ExtraSealLength]
-	var noDep types.BlockExtraDataNoTxDep
-	require.NoError(t, rlp.DecodeBytes(payload, &noDep), "post-Austin Extra must decode as BlockExtraDataNoTxDep")
+	var noDep types.BlockExtraDataPostAustin
+	require.NoError(t, rlp.DecodeBytes(payload, &noDep), "post-Austin Extra must decode as BlockExtraDataPostAustin")
 	require.NotEmpty(t, noDep.ValidatorBytes)
 	require.NotNil(t, noDep.GasTarget)
 
